@@ -1,0 +1,1387 @@
+===== ARQUIVO: C:\sofia-ai\backend\main.py ===== 
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
+from dotenv import load_dotenv
+import sys, os
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(BASE_DIR)
+load_dotenv()
+
+from db.database import init_db
+from api.routes_leads import router as leads_router
+from api.routes_calls import router as calls_router
+from api.routes_crm import router as crm_router
+from api.routes_whatsapp import router as whatsapp_router
+
+STATIC_DIR = os.path.join(BASE_DIR, "static")
+os.makedirs(STATIC_DIR, exist_ok=True)
+
+
+app = FastAPI(title=os.getenv("APP_NAME", "Sofia AI"), version="4.0.0")
+
+app.include_router(whatsapp_router, prefix="/api/whatsapp")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"]
+)
+
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+app.include_router(leads_router, prefix="/api/leads",  tags=["Leads"])
+app.include_router(calls_router, prefix="/api/calls",  tags=["Ligações"])
+app.include_router(crm_router,   prefix="/api/crm",    tags=["CRM"])
+
+@app.get("/dashboard")
+def dashboard():
+    return FileResponse(os.path.join(STATIC_DIR, "dashboard.html"))
+
+@app.on_event("startup")
+def startup():
+    init_db()
+    print("🚀 Sofia AI v4 — ElevenLabs Conversational AI — Pronta!")
+
+@app.get("/")
+def home():
+    return {
+        "status": "online",
+        "versao": "4.0.0",
+        "dashboard": "/dashboard"
+    }
+===== ARQUIVO: C:\sofia-ai\backend\__init__.py ===== 
+
+===== ARQUIVO: C:\sofia-ai\backend\api\routes_calls.py ===== 
+from fastapi import APIRouter, Depends, Request, BackgroundTasks
+from pydantic import BaseModel
+from typing import Optional
+from sqlalchemy.orm import Session
+from db.database import get_db, Lead, CallSession
+from voice.dialer import fazer_ligacao
+from voice.brain import classificar_lead
+from integrations.whatsapp import enviar_whatsapp, enviar_confirmacao_agendamento
+from datetime import datetime
+import os, json, hmac, hashlib, asyncio
+from fastapi import APIRouter, Depends, Request, BackgroundTasks
+from fastapi import APIRouter, Depends, Request, BackgroundTasks, Form
+from integrations.calendar import agendar_reuniao
+
+router = APIRouter()
+
+ELEVENLABS_WEBHOOK_SECRET = os.getenv("ELEVENLABS_WEBHOOK_SECRET", "")
+
+
+class LigarPayload(BaseModel):
+    lead_id: Optional[str] = None
+    phone:   Optional[str] = None
+    name:    Optional[str] = ""
+
+class LotePayload(BaseModel):
+    intervalo_segundos: int = 30
+    limite: Optional[int] = None
+
+
+@router.post("/ligar")
+def ligar(dados: LigarPayload, db: Session = Depends(get_db)):
+    if dados.lead_id:
+        lead = db.get(Lead, dados.lead_id)
+        if not lead:
+            return {"erro": "Lead não encontrado"}
+        conversation_id = fazer_ligacao(lead.phone, lead.name or "")
+        lead.stage         = "ligando"
+        lead.call_attempts += 1
+        lead.last_call_at  = datetime.utcnow()
+        lead.call_sid      = conversation_id
+        db.commit()
+        return {"mensagem": "Ligação iniciada!", "conversation_id": conversation_id, "lead": lead.name}
+    else:
+        conversation_id = fazer_ligacao(dados.phone or "", dados.name or "")
+        return {"mensagem": "Ligação iniciada!", "conversation_id": conversation_id}
+    
+@router.post("/ligar")
+def ligar(dados: LigarPayload, db: Session = Depends(get_db)):
+    if dados.lead_id:
+        lead = db.get(Lead, dados.lead_id)
+        if not lead:
+            return {"erro": "Lead não encontrado"}
+        
+        # Bloqueia se já foi contatado
+        if lead.stage not in ("novo", "nao_atendeu"):
+            return {"erro": f"Lead já foi contatado — stage atual: {lead.stage}"}
+        
+        conversation_id = fazer_ligacao(lead.phone, lead.name or "")
+        lead.stage         = "ligando"
+        lead.call_attempts += 1
+        lead.last_call_at  = datetime.utcnow()
+        lead.call_sid      = conversation_id
+        db.commit()
+        return {"mensagem": "Ligação iniciada!", "conversation_id": conversation_id, "lead": lead.name}
+    else:
+        # Verifica se já existe lead com esse número
+        phone_limpo = "".join(c for c in (dados.phone or "") if c.isdigit())
+        lead_existente = db.query(Lead).filter(Lead.phone.contains(phone_limpo[-8:])).first()
+        if lead_existente and lead_existente.stage not in ("novo", "nao_atendeu"):
+            return {"erro": f"Número já existe no CRM — stage: {lead_existente.stage}"}
+        
+        conversation_id = fazer_ligacao(dados.phone or "", dados.name or "")
+        return {"mensagem": "Ligação iniciada!", "conversation_id": conversation_id}
+
+
+@router.post("/disparar-lote")
+async def disparar_lote(
+    dados: LotePayload,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
+    query = db.query(Lead).filter(Lead.stage == "novo")
+    if dados.limite:
+        query = query.limit(dados.limite)
+    leads = query.all()
+
+    if not leads:
+        return {"mensagem": "Nenhum lead novo encontrado", "total": 0}
+
+    lead_ids = [l.id for l in leads]
+    background_tasks.add_task(_executar_lote, lead_ids, dados.intervalo_segundos)
+
+    return {
+        "mensagem": "Disparando lote em background!",
+        "total_leads": len(lead_ids),
+        "intervalo_segundos": dados.intervalo_segundos,
+        "tempo_estimado_minutos": round((len(lead_ids) * dados.intervalo_segundos) / 60, 1)
+    }
+
+
+async def _executar_lote(lead_ids: list, intervalo: int):
+    from db.database import SessionLocal
+    db = SessionLocal()
+    try:
+        for i, lead_id in enumerate(lead_ids):
+            lead = db.get(Lead, lead_id)
+            if not lead or lead.stage != "novo":
+                continue
+            try:
+                print(f"📞 Lote [{i+1}/{len(lead_ids)}] — {lead.name} ({lead.phone})")
+                conv_id = fazer_ligacao(lead.phone, lead.name or "")
+                lead.stage         = "ligando"
+                lead.call_attempts += 1
+                lead.last_call_at  = datetime.utcnow()
+                lead.call_sid      = conv_id
+                db.commit()
+            except Exception as e:
+                print(f"   ❌ Erro: {e}")
+            if i < len(lead_ids) - 1:
+                await asyncio.sleep(intervalo)
+    finally:
+        db.close()
+
+
+@router.post("/pos-chamada")
+async def pos_chamada(request: Request, db: Session = Depends(get_db)):
+    body_bytes = await request.body()
+    payload = json.loads(body_bytes)
+    print(f"📥 Webhook pós-chamada recebido")
+
+    data        = payload.get("data", {})
+    metadata    = data.get("metadata", {})
+    phone_call  = metadata.get("phone_call", {})
+
+    conversation_id = data.get("conversation_id", "")
+    twilio_call_sid = phone_call.get("call_sid", "")
+    status          = data.get("status", "done")
+    duracao         = metadata.get("call_duration_secs", 0)
+    transcricao_raw = data.get("transcript", [])
+
+    print(f"   conversation_id: {conversation_id}")
+    print(f"   twilio_call_sid: {twilio_call_sid}")
+    print(f"   duração: {duracao}s | turnos: {len(transcricao_raw)}")
+
+    lead = (
+        db.query(Lead).filter(Lead.call_sid == conversation_id).first() or
+        db.query(Lead).filter(Lead.call_sid == twilio_call_sid).first()
+    )
+
+    if not lead:
+        print(f"⚠️ Lead não encontrado — conv: {conversation_id} | twilio: {twilio_call_sid}")
+        return {"ok": True, "aviso": "Lead não encontrado"}
+
+    # Não atendeu — duração muito curta
+    if duracao < 25 or status in ("no-answer", "busy", "failed"):
+        lead.stage = "nao_atendeu"
+        db.commit()
+        print(f"📵 {lead.name} não atendeu ({duracao}s)")
+        enviar_whatsapp(lead.phone, lead.name)
+        return {"ok": True, "acao": "nao_atendeu"}
+
+    # Atendeu — monta transcrição
+    historico = []
+    transcricao_texto = ""
+    for turno in transcricao_raw:
+        role    = "user" if turno.get("role") == "user" else "assistant"
+        content = (turno.get("message") or turno.get("content") or "").strip()
+        if not content:
+            continue
+        historico.append({"role": role, "content": content})
+        quem = "Cliente" if role == "user" else "Sofia"
+        transcricao_texto += f"{quem}: {content}\n"
+
+    if not historico:
+        lead.stage = "nao_atendeu"
+        db.commit()
+        return {"ok": True, "acao": "sem_transcricao"}
+
+    print(f"🧠 Classificando {lead.name} ({duracao}s de conversa)...")
+    classificacao = classificar_lead(historico)
+    print(f"   Resultado: {classificacao}")
+
+    lead.conversa      = transcricao_texto
+    lead.resumo        = classificacao.get("resumo", "")
+    lead.temperature   = classificacao.get("temperatura", "cold")
+    lead.product       = classificacao.get("produto") or ""
+    lead.desired_value = classificacao.get("valor_desejado") or ""
+    lead.urgency       = classificacao.get("urgencia") or ""
+
+    # Limpa dados anteriores
+    lead.agendado_hora = None
+    lead.resumo = ""
+
+# Salva novos dados
+    lead.conversa      = transcricao_texto
+    lead.resumo        = classificacao.get("resumo", "")
+    lead.temperature   = classificacao.get("temperatura", "cold")
+    lead.product       = classificacao.get("produto") or ""
+    lead.desired_value = classificacao.get("valor_desejado") or ""
+    lead.urgency       = classificacao.get("urgencia") or ""
+
+    if classificacao.get("agendado_hora"):
+        lead.agendado_hora = classificacao["agendado_hora"]
+
+    temp = classificacao.get("temperatura", "cold")
+    # Agendamento agora é feito pelo WhatsApp
+    if lead.agendado_hora:
+        lead.agendado_hora = None  # limpa — será definido pelo WhatsApp
+
+    if temp in ("hot", "warm") or duracao >= 60:
+        lead.stage = "interessado"
+        # Envia WhatsApp de agendamento
+        from integrations.whatsapp import enviar_agendamento_whatsapp
+        enviar_agendamento_whatsapp(lead.phone, lead.name)
+    elif temp == "cold":
+        lead.stage = "sem_interesse"
+    else:
+        lead.stage = "atendeu"
+
+    sessao = CallSession(
+        lead_id      = lead.id,
+        twilio_sid   = conversation_id,
+        status       = status,
+        duration_sec = int(duracao),
+        transcript   = transcricao_texto,
+        resumo       = lead.resumo,
+        resultado    = temp
+    )
+    db.add(sessao)
+    lead.updated_at = datetime.utcnow()
+    db.commit()
+
+    print(f"✅ Lead {lead.name} → stage: {lead.stage} | temp: {lead.temperature}")
+    return {"ok": True, "stage": lead.stage, "temperatura": lead.temperature}
+
+@router.post("/amd-status")
+async def amd_status(
+    CallSid: Optional[str] = Form(None),
+    AnsweredBy: Optional[str] = Form(None),
+    db: Session = Depends(get_db)
+):
+    print(f"🤖 AMD: {CallSid} — {AnsweredBy}")
+
+    if AnsweredBy in ("machine_start", "machine_end_beep", "machine_end_silence", "machine_end_other", "fax"):
+        # Busca pelo twilio_sid salvo na CallSession
+        from db.database import CallSession
+        sessao = db.query(CallSession).filter(CallSession.twilio_sid == CallSid).first()
+        lead = None
+        if sessao:
+            lead = db.get(Lead, sessao.lead_id)
+        else:
+            # Fallback: busca direto no lead
+            lead = db.query(Lead).filter(Lead.call_sid == CallSid).first()
+
+        if lead:
+            lead.stage = "nao_atendeu"
+            db.commit()
+            print(f"📱 Caixa postal — {lead.name} → nao_atendeu")
+            enviar_whatsapp(lead.phone, lead.name)
+        else:
+            print(f"⚠️ Lead não encontrado para CallSid: {CallSid}")
+
+
+@router.post("/verificar-agenda")
+async def verificar_agenda(request: Request):
+    body = await request.json()
+    data_hora = body.get("data_hora", "")
+    tipo = body.get("tipo", "ligacao")  # ligacao ou meet
+    
+    from integrations.calendar import verificar_disponibilidade, buscar_proximos_horarios
+    
+    resultado = verificar_disponibilidade(data_hora)
+    
+    if resultado["disponivel"]:
+        return {
+            "disponivel": True,
+            "mensagem": f"Horário {data_hora} está disponível!",
+            "tipo": tipo
+        }
+    else:
+        proximos = buscar_proximos_horarios(data_hora)
+        return {
+            "disponivel": False,
+            "mensagem": f"Horário ocupado. Próximos disponíveis: {', '.join(proximos)}",
+            "proximos_horarios": proximos
+        }.
+===== ARQUIVO: C:\sofia-ai\backend\api\routes_crm.py ===== 
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+from db.database import get_db, Lead, CallSession
+from pydantic import BaseModel
+from typing import Optional
+from datetime import datetime
+
+router = APIRouter()
+
+class AtualizarLeadPayload(BaseModel):
+    stage:       Optional[str] = None
+    resumo:      Optional[str] = None
+    produto:     Optional[str] = None
+    temperatura: Optional[str] = None
+    agendado_hora: Optional[str] = None
+    especialista:  Optional[str] = None
+    notes:         Optional[str] = None
+
+@router.get("/pipeline")
+def pipeline(db: Session = Depends(get_db)):
+    leads = db.query(Lead).order_by(Lead.created_at.desc()).all()
+
+    stages = {
+        "novo": [],
+        "ligando": [],
+        "atendeu": [],
+        "interessado": [],
+        "agendado": [],
+        "fechado": [],
+        "nao_atendeu": [],
+        "sem_interesse": [],
+        "arquivado": []
+    }
+
+    for l in leads:
+        stage = l.stage if l.stage in stages else "novo"
+        stages[stage].append({
+            "id": l.id,
+            "name": l.name,
+            "phone": l.phone,
+            "stage": l.stage,
+            "temperature": l.temperature,
+            "product": l.product,
+            "resumo": l.resumo,
+            "agendado_hora": l.agendado_hora,
+            "especialista": l.especialista,
+            "call_attempts": l.call_attempts,
+            "last_call_at": str(l.last_call_at) if l.last_call_at else None,
+            "created_at": str(l.created_at)
+        })
+
+    totais = {k: len(v) for k, v in stages.items()}
+    totais["total"] = len(leads)
+
+    return {"pipeline": stages, "totais": totais}
+
+@router.get("/lead/{lead_id}")
+def detalhe_lead(lead_id: str, db: Session = Depends(get_db)):
+    lead = db.get(Lead, lead_id)
+    if not lead:
+        return {"erro": "Lead não encontrado"}
+
+    sessoes = db.query(CallSession).filter(CallSession.lead_id == lead_id).all()
+
+    return {
+        "id": lead.id,
+        "name": lead.name,
+        "phone": lead.phone,
+        "email": lead.email,
+        "stage": lead.stage,
+        "temperature": lead.temperature,
+        "product": lead.product,
+        "resumo": lead.resumo,
+        "conversa": lead.conversa,
+        "agendado_hora": lead.agendado_hora,
+        "especialista": lead.especialista,
+        "call_attempts": lead.call_attempts,
+        "created_at": str(lead.created_at),
+        "sessoes": [
+            {
+                "id": s.id,
+                "status": s.status,
+                "duration_sec": s.duration_sec,
+                "resumo": s.resumo,
+                "resultado": s.resultado,
+                "started_at": str(s.started_at)
+            }
+            for s in sessoes
+        ]
+    }
+
+@router.put("/lead/{lead_id}")
+def atualizar_lead(lead_id: str, dados: AtualizarLeadPayload, db: Session = Depends(get_db)):
+    lead = db.get(Lead, lead_id)
+    if not lead:
+        return {"erro": "Lead não encontrado"}
+
+    if dados.stage:        lead.stage = dados.stage
+    if dados.resumo:       lead.resumo = dados.resumo
+    if dados.produto:      lead.product = dados.produto
+    if dados.temperatura:  lead.temperature = dados.temperatura
+    if dados.agendado_hora: lead.agendado_hora = dados.agendado_hora
+    if dados.especialista: lead.especialista = dados.especialista
+    if dados.notes:        lead.ai_summary = dados.notes
+
+    lead.updated_at = datetime.utcnow()
+    db.commit()
+
+    return {"mensagem": "Lead atualizado!", "stage": lead.stage}
+
+@router.get("/retentar")
+def leads_para_retentar(db: Session = Depends(get_db)):
+    leads = db.query(Lead).filter(
+        Lead.stage.in_(["nao_atendeu", "retentar"])
+    ).all()
+
+    return [
+        {
+            "id": l.id,
+            "name": l.name,
+            "phone": l.phone,
+            "stage": l.stage,
+            "call_attempts": l.call_attempts,
+            "last_call_at": str(l.last_call_at) if l.last_call_at else None
+        }
+        for l in leads
+    ]
+
+@router.get("/interessados")
+def leads_interessados(db: Session = Depends(get_db)):
+    leads = db.query(Lead).filter(
+        Lead.stage.in_(["interessado", "agendado"])
+    ).order_by(Lead.updated_at.desc()).all()
+
+    return [
+        {
+            "id": l.id,
+            "name": l.name,
+            "phone": l.phone,
+            "stage": l.stage,
+            "product": l.product,
+            "resumo": l.resumo,
+            "agendado_hora": l.agendado_hora,
+            "especialista": l.especialista,
+            "call_attempts": l.call_attempts
+        }
+        for l in leads
+    ].
+===== ARQUIVO: C:\sofia-ai\backend\api\routes_leads.py ===== 
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi import UploadFile, File
+from pydantic import BaseModel
+from typing import Optional
+from sqlalchemy.orm import Session
+from db.database import get_db, Lead
+from datetime import datetime
+import csv, io
+
+router = APIRouter()
+
+class LeadCreate(BaseModel):
+    name:  Optional[str] = None
+    phone: str
+    email: Optional[str] = None
+
+class LeadUpdate(BaseModel):
+    name:  Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    stage: Optional[str] = None
+
+
+@router.post("/")
+def criar_lead(dados: LeadCreate, db: Session = Depends(get_db)):
+    lead = Lead(name=dados.name, phone=dados.phone, email=dados.email)
+    db.add(lead)
+    db.commit()
+    db.refresh(lead)
+    return {"mensagem": "Lead cadastrado!", "id": lead.id}
+
+
+@router.get("/")
+def listar_leads(db: Session = Depends(get_db)):
+    leads = db.query(Lead).order_by(Lead.created_at.desc()).all()
+    return [
+        {
+            "id"          : l.id,
+            "name"        : l.name,
+            "phone"       : l.phone,
+            "email"       : l.email,
+            "stage"       : l.stage,
+            "temperature" : l.temperature,
+            "product"     : l.product,
+            "resumo"      : l.resumo,
+            "conversa"    : l.conversa,
+            "agendado_hora": l.agendado_hora,
+            "especialista": l.especialista,
+            "call_attempts": l.call_attempts,
+            "last_call_at": str(l.last_call_at) if l.last_call_at else None,
+            "created_at"  : str(l.created_at)
+        }
+        for l in leads
+    ]
+
+
+@router.get("/{lead_id}")
+def buscar_lead(lead_id: str, db: Session = Depends(get_db)):
+    lead = db.get(Lead, lead_id)
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead não encontrado")
+    return lead
+
+
+@router.put("/{lead_id}")
+def atualizar_lead(lead_id: str, dados: LeadUpdate, db: Session = Depends(get_db)):
+    lead = db.get(Lead, lead_id)
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead não encontrado")
+    if dados.name  is not None: lead.name  = dados.name
+    if dados.phone is not None: lead.phone = dados.phone
+    if dados.email is not None: lead.email = dados.email
+    if dados.stage is not None: lead.stage = dados.stage
+    lead.updated_at = datetime.utcnow()
+    db.commit()
+    return {"mensagem": "Lead atualizado!", "stage": lead.stage}
+
+
+@router.delete("/{lead_id}")
+def deletar_lead(lead_id: str, db: Session = Depends(get_db)):
+    lead = db.get(Lead, lead_id)
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead não encontrado")
+    db.delete(lead)
+    db.commit()
+    return {"mensagem": "Lead deletado!"}
+
+
+@router.post("/importar-csv")
+async def importar_csv(file: UploadFile = File(...), db: Session = Depends(get_db)):
+    conteudo = await file.read()
+    texto = conteudo.decode("utf-8-sig")
+    reader = csv.DictReader(io.StringIO(texto))
+
+    importados = 0
+    for row in reader:
+        phone = row.get("telefone") or row.get("phone") or row.get("Telefone") or ""
+        name  = row.get("nome") or row.get("name") or row.get("Nome") or ""
+        if not phone:
+            continue
+        lead = Lead(name=name.strip(), phone=phone.strip())
+        db.add(lead)
+        importados += 1
+
+    db.commit()
+    return {"mensagem": f"{importados} leads importados!", "importados": importados}.
+===== ARQUIVO: C:\sofia-ai\backend\api\routes_whatsapp.py ===== 
+import os, json
+from fastapi import APIRouter, Request, Depends
+from sqlalchemy.orm import Session
+from db.database import get_db, Lead
+from integrations.whatsapp import _enviar, _formatar_numero
+from integrations.calendar import verificar_disponibilidade, buscar_proximos_horarios, agendar_reuniao
+from datetime import datetime
+
+router = APIRouter()
+
+# Estado das conversas em memória
+conversas = {}
+
+
+def _gpt_interpretar(mensagem: str, contexto: str) -> dict:
+    from openai import OpenAI
+    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    hoje = datetime.now().strftime("%Y-%m-%d %A")
+    
+    resposta = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{
+            "role": "system",
+            "content": f"""Você é Sofia, assistente da FLC Bank. Hoje é {hoje}.
+Analise a mensagem do cliente e responda em JSON:
+{{
+  "intencao": "confirmar_horario|pedir_meet|pedir_ligacao|outro",
+  "data_hora": "YYYY-MM-DD HH:MM ou null",
+  "quer_meet": true/false
+}}
+Contexto: {contexto}
+Responda APENAS com JSON, sem explicações."""
+        }, {
+            "role": "user",
+            "content": mensagem
+        }],
+        max_tokens=100,
+        temperature=0
+    )
+    
+    texto = resposta.choices[0].message.content.strip()
+    try:
+        return json.loads(texto.replace("json", "").replace("", ""))
+    except:
+        return {"intencao": "outro", "data_hora": None, "quer_meet": False}
+
+
+@router.post("/webhook")
+async def whatsapp_webhook(request: Request, db: Session = Depends(get_db)):
+    try:
+        body = await request.json()
+        
+        # Ignora mensagens enviadas pelo próprio bot
+        event = body.get("event", "")
+        if event != "messages.upsert":
+            return {"ok": True}
+
+        data = body.get("data", {})
+        key  = data.get("key", {})
+        
+        # Ignora mensagens do próprio número
+        if key.get("fromMe"):
+            return {"ok": True}
+
+        mensagem_obj = data.get("message", {})
+        texto = (
+            mensagem_obj.get("conversation") or
+            mensagem_obj.get("extendedTextMessage", {}).get("text") or ""
+        ).strip()
+
+        if not texto:
+            return {"ok": True}
+
+        # Pega o número do remetente
+        jid    = key.get("remoteJid", "")
+        numero = jid.replace("@s.whatsapp.net", "").replace("@c.us", "")
+        
+        print(f"📱 WhatsApp recebido de {numero}: {texto}")
+
+        # Busca o lead pelo número
+        digitos = "".join(c for c in numero if c.isdigit())[-8:]
+        lead = db.query(Lead).filter(Lead.phone.contains(digitos)).first()
+
+        if not lead:
+            print(f"⚠️ Lead não encontrado para {numero}")
+            return {"ok": True}
+
+        # Recupera ou cria estado da conversa
+        estado = conversas.get(numero, {"etapa": "aguardando_horario"})
+
+        await _processar_mensagem(texto, numero, lead, estado, db)
+        conversas[numero] = estado
+
+        return {"ok": True}
+    except Exception as e:
+        print(f"❌ Erro webhook WhatsApp: {e}")
+        return {"ok": True}
+
+
+async def _processar_mensagem(texto: str, numero: str, lead, estado: dict, db):
+    etapa = estado.get("etapa", "aguardando_horario")
+
+    if etapa == "aguardando_horario":
+        interpretacao = _gpt_interpretar(texto, f"Cliente {lead.name} quer agendar reunião")
+        data_hora = interpretacao.get("data_hora")
+        quer_meet = interpretacao.get("quer_meet", False)
+
+        if not data_hora:
+            _enviar(numero, 
+                f"Entendi! 😊 Qual dia e horário fica melhor para você?\n\n"
+                f"Por exemplo: quinta-feira às 14h ou 05/03 às 10h"
+            )
+            return
+
+        # Verifica disponibilidade
+        disponibilidade = verificar_disponibilidade(data_hora)
+        
+        if disponibilidade["disponivel"]:
+            estado["etapa"]    = "confirmar"
+            estado["data_hora"] = disponibilidade["data_hora"]
+            estado["quer_meet"] = quer_meet
+            
+            tipo = "Google Meet 🎥" if quer_meet else "ligação telefônica 📞"
+            _enviar(numero,
+                f"Ótimo! Tenho disponibilidade em {data_hora}.\n\n"
+                f"A reunião será por {tipo}. Confirma? (sim/não)"
+            )
+        else:
+            proximos = buscar_proximos_horarios(data_hora)
+            opcoes = "\n".join([f"• {h}" for h in proximos])
+            _enviar(numero,
+                f"Poxa, esse horário já está ocupado! 😅\n\n"
+                f"Tenho esses horários disponíveis:\n{opcoes}\n\n"
+                f"Qual prefere?"
+            )
+
+    elif etapa == "confirmar":
+        if any(s in texto.lower() for s in ["sim", "confirmo", "ok", "pode", "isso", "certo"]):
+            data_hora  = estado.get("data_hora")
+            quer_meet  = estado.get("quer_meet", False)
+            
+            resultado = agendar_reuniao(lead.name, lead.phone, data_hora, meet=quer_meet)
+            
+            if resultado["sucesso"]:
+                lead.stage        = "agendado"
+                lead.agendado_hora = data_hora
+                db.commit()
+                
+                link_meet = resultado.get("link_meet")
+                if quer_meet and link_meet:
+                    _enviar(numero,
+                        f"✅ Reunião confirmada para {data_hora}!\n\n"
+                        f"🎥 Link do Google Meet:\n{link_meet}\n\n"
+                        f"Até lá! 👋"
+                    )
+                else:
+                    _enviar(numero,
+                        f"✅ Reunião confirmada para {data_hora}!\n\n"
+                        f"📞 Um especialista da FLC Bank vai te ligar no horário combinado.\n\n"
+                        f"Até lá! 👋"
+                    )
+                del conversas[lead.phone.replace("+", "").replace(" ", "")[-10:]]
+            else:
+                proximos = buscar_proximos_horarios(data_hora)
+                opcoes = "\n".join([f"• {h}" for h in proximos])
+                estado["etapa"] = "aguardando_horario"
+                _enviar(numero,
+                    f"Ops! Esse horário acabou de ser ocupado. 😅\n\n"
+                    f"Horários disponíveis:\n{opcoes}\n\n"
+                    f"Qual prefere?"
+                )
+        else:
+            estado["etapa"] = "aguardando_horario"
+            _enviar(numero,
+                f"Sem problema! Qual outro horário seria melhor para você? 📅"
+            ).
+===== ARQUIVO: C:\sofia-ai\backend\api\__init__.py ===== 
+.
+===== ARQUIVO: C:\sofia-ai\backend\db\database.py ===== 
+from sqlalchemy import create_engine, Column, String, Integer, DateTime, Text, Float, ForeignKey
+from sqlalchemy.orm import declarative_base, sessionmaker, relationship
+from datetime import datetime
+import uuid, os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./sofia.db")
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
+engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {})
+SessionLocal = sessionmaker(bind=engine)
+Base = declarative_base()
+
+class Lead(Base):
+    __tablename__ = "leads"
+
+    id            = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    name          = Column(String)
+    phone         = Column(String, nullable=False)
+    email         = Column(String, default="")
+
+    # Pipeline CRM
+    stage         = Column(String, default="novo")
+    # novo → ligando → atendeu → interessado → agendado → fechado
+    # nao_atendeu → retentar → sem_interesse → arquivado
+
+    # Qualificação pela Sofia
+    temperature   = Column(String, default="pending")
+    score         = Column(Float, default=0)
+    product       = Column(String, default="")
+    desired_value = Column(String, default="")
+    urgency       = Column(String, default="")
+    ai_summary    = Column(Text, default="")
+    conversa      = Column(Text, default="")
+    resumo        = Column(Text, default="")
+
+    # Agendamento
+    agendado_hora   = Column(String, default="")
+    especialista    = Column(String, default="")
+    next_call_at    = Column(DateTime, nullable=True)
+
+    # Metadados
+    call_attempts = Column(Integer, default=0)
+    last_call_at  = Column(DateTime, nullable=True)
+    call_sid      = Column(String, default="")
+    created_at    = Column(DateTime, default=datetime.utcnow)
+    updated_at    = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    sessions      = relationship("CallSession", back_populates="lead")
+
+class CallSession(Base):
+    __tablename__ = "call_sessions"
+
+    id           = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    lead_id      = Column(String, ForeignKey("leads.id"))
+    twilio_sid   = Column(String, default="")
+    status       = Column(String, default="")
+    duration_sec = Column(Integer, default=0)
+    transcript   = Column(Text, default="")
+    resumo       = Column(Text, default="")
+    resultado    = Column(String, default="")
+    started_at   = Column(DateTime, default=datetime.utcnow)
+
+    lead         = relationship("Lead", back_populates="sessions")
+
+def init_db():
+    Base.metadata.create_all(bind=engine)
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close().
+===== ARQUIVO: C:\sofia-ai\backend\integrations\calendar.py ===== 
+import os, json, requests
+from datetime import datetime, timedelta
+from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
+
+CALENDAR_ID      = os.getenv("GOOGLE_CALENDAR_ID", "")
+SERVICE_JSON     = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "")
+CALCOM_API_KEY   = os.getenv("CALCOM_API_KEY", "")
+CALCOM_EVENT_ID  = os.getenv("CALCOM_EVENT_TYPE_ID", "")
+SCOPES           = ["https://www.googleapis.com/auth/calendar"]
+
+
+def _get_service():
+    info  = json.loads(SERVICE_JSON)
+    creds = Credentials.from_service_account_info(info, scopes=SCOPES)
+    return build("calendar", "v3", credentials=creds)
+
+
+def _converter_para_datetime(texto: str) -> str:
+    from openai import OpenAI
+    client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+    hoje = datetime.now().strftime("%Y-%m-%d")
+    resposta = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": f"Hoje é {hoje}. Converta '{texto}' para o formato YYYY-MM-DD HH:MM. Responda APENAS com a data no formato, sem explicações."}],
+        max_tokens=20, temperature=0
+    )
+    return resposta.choices[0].message.content.strip()
+
+
+def _slot_ocupado(service, inicio: datetime, fim: datetime) -> bool:
+    time_min = inicio.strftime("%Y-%m-%dT%H:%M:%S-03:00")
+    time_max = fim.strftime("%Y-%m-%dT%H:%M:%S-03:00")
+    eventos  = service.events().list(
+        calendarId=CALENDAR_ID,
+        timeMin=time_min,
+        timeMax=time_max,
+        singleEvents=True,
+        orderBy="startTime"
+    ).execute()
+    itens = eventos.get("items", [])
+    print(f"   🔍 Verificando {time_min} → {time_max}: {len(itens)} eventos")
+    return len(itens) > 0
+
+def verificar_disponibilidade(data_hora_str: str) -> dict:
+    try:
+        service = _get_service()
+        try:
+            datetime.strptime(data_hora_str, "%Y-%m-%d %H:%M")
+            data_formatada = data_hora_str
+        except ValueError:
+            data_formatada = _converter_para_datetime(data_hora_str)
+
+        inicio  = datetime.strptime(data_formatada, "%Y-%m-%d %H:%M")
+        fim     = inicio + timedelta(hours=1)
+        ocupado = _slot_ocupado(service, inicio, fim)
+        return {"disponivel": not ocupado, "data_hora": data_formatada}
+    except Exception as e:
+        print(f"❌ Erro verificar_disponibilidade: {e}")
+        return {"disponivel": True, "data_hora": data_hora_str}
+
+
+def buscar_proximos_horarios(data_hora_str: str, quantidade: int = 3) -> list:
+    try:
+        service = _get_service()
+        try:
+            datetime.strptime(data_hora_str, "%Y-%m-%d %H:%M")
+            data_formatada = data_hora_str
+        except ValueError:
+            data_formatada = _converter_para_datetime(data_hora_str)
+
+        base      = datetime.strptime(data_formatada, "%Y-%m-%d %H:%M")
+        livres    = []
+        tentativa = base + timedelta(hours=1)
+
+        while len(livres) < quantidade:
+            fim = tentativa + timedelta(hours=1)
+            if not _slot_ocupado(service, tentativa, fim):
+                livres.append(tentativa.strftime("%d/%m às %Hh"))
+            tentativa += timedelta(hours=1)
+
+        return livres
+    except Exception as e:
+        print(f"❌ Erro buscar_proximos: {e}")
+        return []
+
+
+def agendar_reuniao(nome: str, phone: str, data_hora_str: str, meet: bool = False) -> dict:
+    try:
+        service = _get_service()
+
+        try:
+            datetime.strptime(data_hora_str, "%Y-%m-%d %H:%M")
+            data_formatada = data_hora_str
+        except ValueError:
+            data_formatada = _converter_para_datetime(data_hora_str)
+            print(f"   📅 Convertido: '{data_hora_str}' → '{data_formatada}'")
+
+        inicio = datetime.strptime(data_formatada, "%Y-%m-%d %H:%M")
+        fim    = inicio + timedelta(hours=1)
+
+        if _slot_ocupado(service, inicio, fim):
+            print(f"⚠️ Horário ocupado: {data_formatada}")
+            return {"sucesso": False, "link_meet": None}
+
+        link_meet = None
+
+        # Se for Meet, cria via Cal.com
+        if meet and CALCOM_API_KEY and CALCOM_EVENT_ID:
+            link_meet = _criar_reuniao_calcom(nome, phone, inicio)
+
+        # Agenda no Google Calendar
+        tipo = f"Google Meet" if meet else "Ligação telefônica"
+        evento = {
+            "summary": f"Reunião com {nome} — FLC Bank ({tipo})",
+            "description": f"Lead: {nome}\nTelefone: {phone}\nTipo: {tipo}\n{'Meet: ' + link_meet if link_meet else ''}\nAgendado pela Sofia AI",
+            "start": {"dateTime": inicio.strftime("%Y-%m-%dT%H:%M:%S"), "timeZone": "America/Sao_Paulo"},
+            "end":   {"dateTime": fim.strftime("%Y-%m-%dT%H:%M:%S"),    "timeZone": "America/Sao_Paulo"},
+        }
+
+        service.events().insert(calendarId=CALENDAR_ID, body=evento).execute()
+        print(f"✅ Reunião agendada: {nome} em {data_formatada} — {tipo}")
+        return {"sucesso": True, "link_meet": link_meet, "meet": meet}
+
+    except Exception as e:
+        print(f"❌ Erro ao agendar: {e}")
+        return {"sucesso": False, "link_meet": None}
+
+
+def _criar_reuniao_calcom(nome: str, phone: str, inicio: datetime) -> str:
+    try:
+        # Formato ISO com timezone Brasil
+        start_time = inicio.strftime("%Y-%m-%dT%H:%M:%S-03:00")
+
+        payload = {
+            "eventTypeId": int(CALCOM_EVENT_ID),
+            "start": start_time,
+            "responses": {
+                "name": nome,
+                "email": f"{phone}@placeholder.com",
+                "phone": phone,
+            },
+            "timeZone": "America/Sao_Paulo",
+            "language": "pt-BR",
+            "metadata": {}
+        }
+
+        res = requests.post(
+            "https://api.cal.com/v1/bookings",
+            json=payload,
+            params={"apiKey": CALCOM_API_KEY},
+            timeout=30
+        )
+
+        if res.status_code in (200, 201):
+            data = res.json()
+            meeting_url = data.get("meetingUrl") or data.get("videoCallData", {}).get("url", "")
+            print(f"✅ Cal.com booking criado — Meet: {meeting_url}")
+            return meeting_url
+        else:
+            print(f"❌ Cal.com erro {res.status_code}: {res.text}")
+            return ""
+    except Exception as e:
+        print(f"❌ Erro Cal.com: {e}")
+        return "".
+===== ARQUIVO: C:\sofia-ai\backend\integrations\whatsapp.py ===== 
+import os, requests
+
+EVOLUTION_URL      = os.getenv("EVOLUTION_API_URL", "")
+EVOLUTION_KEY      = os.getenv("EVOLUTION_API_KEY", "")
+EVOLUTION_INSTANCE = os.getenv("EVOLUTION_INSTANCE", "IA")
+
+
+def _formatar_numero(phone: str) -> str:
+    digitos = "".join(c for c in phone if c.isdigit())
+    if not digitos.startswith("55"):
+        digitos = "55" + digitos
+    return digitos
+
+
+def enviar_whatsapp(phone: str, nome: str):
+    numero = _formatar_numero(phone)
+    mensagem = (
+        f"Olá {nome or 'tudo bem'}! 👋\n\n"
+        f"Aqui é a Sofia da FLC Bank. Tentei te ligar agora mas não consegui falar com você.\n\n"
+        f"Temos condições especiais de crédito com acesso a mais de 60 instituições financeiras. "
+        f"Quando tiver um momento, me responda aqui e posso te apresentar as opções! 😊"
+    )
+    _enviar(numero, mensagem)
+
+
+def enviar_confirmacao_agendamento(phone: str, nome: str, horario: str, link_meet: str = None):
+    numero = _formatar_numero(phone)
+    if link_meet:
+        mensagem = (
+            f"Olá {nome or ''}! 😊\n\n"
+            f"Sua reunião foi agendada para {horario}.\n\n"
+            f"🎥 Link do Google Meet:\n{link_meet}\n\n"
+            f"Um especialista da FLC Bank estará te esperando. Qualquer dúvida é só responder aqui!\n\n"
+            f"Até logo! 👋"
+        )
+    else:
+        mensagem = (
+            f"Olá {nome or ''}! 😊\n\n"
+            f"Sua reunião foi agendada para {horario}.\n\n"
+            f"📞 Um especialista da FLC Bank vai te ligar no horário combinado. "
+            f"Qualquer dúvida é só responder aqui!\n\n"
+            f"Até logo! 👋"
+        )
+    _enviar(numero, mensagem)
+
+
+def _enviar(numero: str, mensagem: str):
+    if not EVOLUTION_URL or not EVOLUTION_KEY:
+        print(f"⚠️ WhatsApp não configurado — pulando envio para {numero}")
+        return
+
+    url = f"{EVOLUTION_URL}/message/sendText/{EVOLUTION_INSTANCE}"
+    headers = {
+        "apikey": EVOLUTION_KEY,
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "number": numero,
+        "text": mensagem
+    }
+
+    try:
+        res = requests.post(url, json=payload, headers=headers, timeout=10)
+        if res.status_code in (200, 201):
+            print(f"✅ WhatsApp enviado para {numero}")
+        else:
+            print(f"❌ Erro WhatsApp {res.status_code}: {res.text}")
+    except Exception as e:
+        print(f"❌ Erro ao enviar WhatsApp: {e}")
+
+def enviar_agendamento_whatsapp(phone: str, nome: str):
+    numero = _formatar_numero(phone)
+    mensagem = (
+        f"Olá {nome or ''}! 😊 Aqui é a Sofia da FLC Bank.\n\n"
+        f"Foi um prazer falar com você! Para agendarmos sua reunião com um especialista, "
+        f"qual dia e horário fica melhor para você?\n\n"
+        f"Pode me dizer o dia e a hora que prefere! 📅"
+    )
+    _enviar(numero, mensagem)        .
+===== ARQUIVO: C:\sofia-ai\backend\integrations\__init__.py ===== 
+.
+===== ARQUIVO: C:\sofia-ai\backend\prompts\loader.py ===== 
+import os
+
+def carregar_conhecimento() -> str:
+    pasta = os.path.dirname(os.path.abspath(__file__))
+    conhecimento = []
+
+    for arquivo in sorted(os.listdir(pasta)):
+        if arquivo.endswith(".txt"):
+            caminho = os.path.join(pasta, arquivo)
+            with open(caminho, "r", encoding="utf-8") as f:
+                conteudo = f.read()
+                conhecimento.append(f"=== {arquivo.upper()} ===\n{conteudo}")
+
+    return "\n\n".join(conhecimento).
+===== ARQUIVO: C:\sofia-ai\backend\prompts\__init__.py ===== 
+.
+===== ARQUIVO: C:\sofia-ai\backend\voice\brain.py ===== 
+# brain.py — Classificação pós-ligação com GPT-4o-mini
+# sofia_responder foi removido — ElevenLabs cuida disso agora
+
+from openai import OpenAI
+import os, json, re
+
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+
+def classificar_lead(historico: list) -> dict:
+    conversa = "\n".join([
+        f"{'CLIENTE' if m['role'] == 'user' else 'SOFIA'}: {m['content']}"
+        for m in historico
+    ])
+
+    resposta = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{
+            "role": "user",
+            "content": f"""Analise essa conversa de vendas de crédito financeiro.
+Responda APENAS em JSON válido, sem markdown, sem explicações.
+
+CONVERSA:
+{conversa}
+
+Formato exato:
+{{
+  "temperatura": "hot|warm|cold",
+  "produto": "empréstimo pessoal|crédito consignado|financiamento|capital de giro|outro|null",
+  "valor_desejado": "valor mencionado em reais ou null",
+  "urgencia": "now|month|researching",
+  "agendado_hora": "horário ou data mencionada para reunião, ou null",
+  "resumo": "uma frase descrevendo perfil e necessidade do lead"
+}}
+
+Regras:
+- hot = demonstrou interesse claro, quer avançar ou agendou
+- warm = ouviu com atenção mas não decidiu
+- cold = sem interesse, pediu para não ligar, não falou nada útil
+- Se o cliente desviou o assunto para temas n relacionados a crédito classifica como cold
+- agendado_hora so deve ser preenchido se o cliente EXPLICITAMENTE confirmou um horário específico para a reunião
+- produto: identifica pelo contexto — se falou em dívida/empréstimo=empréstimo pessoal, servidor público=consignado, carro/imóvel=financiamento, empresa=capital de giro"""
+
+        }],
+        max_tokens=250,
+        temperature=0
+    )
+
+    try:
+        texto = resposta.choices[0].message.content.strip()
+        texto = re.sub(r"json|", "", texto).strip()
+        resultado = json.loads(texto)
+        print(f"   📊 temperatura: {resultado.get('temperatura')} | produto: {resultado.get('produto')} | valor: {resultado.get('valor_desejado')}")
+        return resultado
+    except Exception as e:
+        print(f"❌ Erro ao classificar: {e}")
+        return {"temperatura": "cold", "resumo": "Erro ao classificar"}.
+===== ARQUIVO: C:\sofia-ai\backend\voice\dialer.py ===== 
+import requests, os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+ELEVENLABS_API_KEY      = os.getenv("ELEVENLABS_API_KEY")
+ELEVENLABS_AGENT_ID     = os.getenv("ELEVENLABS_AGENT_ID")
+ELEVENLABS_PHONE_NUMBER_ID = os.getenv("ELEVENLABS_PHONE_NUMBER_ID")
+
+def fazer_ligacao(phone: str, nome: str = "") -> str:
+    numero = formatar_telefone(phone)
+
+    url = "https://api.elevenlabs.io/v1/convai/twilio/outbound-call"
+
+    headers = {
+        "xi-api-key": ELEVENLABS_API_KEY,
+        "Content-Type": "application/json"
+    }
+
+    payload = {
+        "agent_id": ELEVENLABS_AGENT_ID,
+        "agent_phone_number_id": ELEVENLABS_PHONE_NUMBER_ID,  # ← campo novo
+        "to_number": numero,                                   # ← campo novo
+        "conversation_initiation_client_data": {
+            "dynamic_variables": {
+                "nome_cliente": nome or "cliente"
+            }
+        }
+    }
+
+    response = requests.post(url, headers=headers, json=payload, timeout=15)
+
+    if response.status_code not in (200, 201):
+        raise Exception(f"Erro ElevenLabs outbound: {response.status_code} — {response.text}")
+
+    data = response.json()
+    conversation_id = data.get("conversation_id", "")
+    print(f"✅ Ligação iniciada — conversation_id: {conversation_id}")
+    return conversation_id
+
+
+def formatar_telefone(phone: str) -> str:
+    limpo = "".join(c for c in phone if c.isdigit())
+    if not limpo.startswith("55"):
+        limpo = "55" + limpo
+    return "+" + limpo
+
+    payload = {
+    "agent_id": ELEVENLABS_AGENT_ID,
+    "agent_phone_number_id": ELEVENLABS_PHONE_NUMBER_ID,
+    "to_number": numero,
+    "twilio_params": {
+        "timeout": "10",
+        "machine_detection": "Enable",
+        "machine_detection_timeout": "5",
+        "machine_detection_speech_threshold": "2400",
+        "machine_detection_speech_end_threshold": "1200",
+        "machine_detection_silence_timeout": "5000"
+    },
+    "conversation_initiation_client_data": {
+        "dynamic_variables": {
+            "nome_cliente": nome or "cliente"
+        }
+    }
+}.
+===== ARQUIVO: C:\sofia-ai\backend\voice\tts.py ===== 
+# tts.py — ElevenLabs com cache de áudio pré-gerado
+# Cache elimina o delay de ~4s para frases repetitivas
+
+import requests, os, uuid, hashlib
+from dotenv import load_dotenv
+
+load_dotenv()
+
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
+VOICE_ID           = os.getenv("ELEVENLABS_VOICE_ID")
+
+# Pasta de cache (áudios pré-gerados ficam aqui entre chamadas)
+CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "static", "cache")
+os.makedirs(CACHE_DIR, exist_ok=True)
+
+# Frases pré-geradas ao iniciar o servidor (chame gerar_cache_inicial())
+FRASES_CACHE = [
+    "Olá! Aqui é a Sofia. Tudo bem? Estou ligando porque temos condições especiais de crédito, com acesso a mais de sessenta instituições financeiras. Posso te apresentar as opções?",
+    "Entendi! Poderia me dizer qual o valor que você precisa e para qual finalidade?",
+    "?",
+    "Perfeito! Temos ótimas condições para isso. Você tem alguma restrição no CPF atualmente?",
+    "Sem problemas! Trabalhamos com crédito mesmo para negativados. Qual seria o melhor horário para um especialista entrar em contato com você?",
+    "Maravilha! Vou registrar seu interesse e em breve um especialista da nossa equipe vai entrar em contato. Obrigada e tenha um ótimo dia!",
+    "Compreendo sua preocupação. Nossa consultoria é totalmente gratuita e sem compromisso. O que você acha de só ouvir as opções disponíveis?",
+    "Tudo bem, sem problema nenhum! Se mudar de ideia, pode nos ligar. Tenha um ótimo dia!",
+    "Um momento, deixa eu verificar as melhores opções para o seu perfil...",
+    "Pode deixar que eu anoto. Vou passar para um especialista entrar em contato com você em breve.",
+    "Ótimo! Agendado! Você receberá uma confirmação em breve. Obrigada e até logo!",
+]
+
+_cache_map: dict[str, str] = {}  # hash → caminho do arquivo
+
+
+def _hash_texto(texto: str) -> str:
+    return hashlib.md5(texto.strip().lower().encode()).hexdigest()
+
+
+def _chamar_elevenlabs(texto: str) -> bytes:
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{VOICE_ID}"
+    headers = {
+        "xi-api-key": ELEVENLABS_API_KEY,
+        "Content-Type": "application/json"
+    }
+    body = {
+        "text": texto,
+        "model_id": "eleven_flash_v2_5",  # modelo mais rápido da ElevenLabs
+        "voice_settings": {
+            "stability": 0.4,
+            "similarity_boost": 0.8,
+            "style": 0.2,
+            "use_speaker_boost": True,
+            "speed": 1.2
+        }
+    }
+    response = requests.post(url, headers=headers, json=body, timeout=15)
+    if response.status_code != 200:
+        raise Exception(f"Erro ElevenLabs {response.status_code}: {response.text}")
+    return response.content
+
+
+def gerar_cache_inicial():
+    """
+    Pré-gera áudio para todas as frases comuns.
+    Chamado no startup do servidor — elimina delay na primeira ocorrência.
+    """
+    print("🎙️ Pré-gerando cache de áudio...")
+    for frase in FRASES_CACHE:
+        h = _hash_texto(frase)
+        caminho = os.path.join(CACHE_DIR, f"{h}.mp3")
+        if os.path.exists(caminho):
+            _cache_map[h] = caminho
+            print(f"   ✅ Cache hit: {frase[:50]}...")
+            continue
+        try:
+            audio = _chamar_elevenlabs(frase)
+            with open(caminho, "wb") as f:
+                f.write(audio)
+            _cache_map[h] = caminho
+            print(f"   🎵 Gerado: {frase[:50]}...")
+        except Exception as e:
+            print(f"   ❌ Erro ao pré-gerar: {e}")
+    print(f"✅ Cache pronto — {len(_cache_map)} frases em memória")
+
+
+def gerar_audio_url(texto: str, webhook_base_url: str) -> str:
+    """
+    Retorna URL do áudio MP3.
+    - Se o texto estiver em cache → retorna instantaneamente (~0ms)
+    - Se não estiver → chama ElevenLabs e salva em cache para próxima vez
+    """
+    h = _hash_texto(texto)
+
+    # Verifica cache em memória
+    if h in _cache_map and os.path.exists(_cache_map[h]):
+        nome_arquivo = os.path.basename(_cache_map[h])
+        url = f"{webhook_base_url}/static/cache/{nome_arquivo}"
+        print(f"⚡ Cache hit — áudio em 0ms: {texto[:50]}...")
+        return url
+
+    # Verifica cache em disco
+    caminho_cache = os.path.join(CACHE_DIR, f"{h}.mp3")
+    if os.path.exists(caminho_cache):
+        _cache_map[h] = caminho_cache
+        url = f"{webhook_base_url}/static/cache/{h}.mp3"
+        print(f"💾 Cache disco: {texto[:50]}...")
+        return url
+
+    # Gera novo áudio via ElevenLabs
+    print(f"🎙️ ElevenLabs — gerando áudio para: {texto[:50]}...")
+    try:
+        audio_bytes = _chamar_elevenlabs(texto)
+
+        # Salva no cache para próxima vez
+        with open(caminho_cache, "wb") as f:
+            f.write(audio_bytes)
+        _cache_map[h] = caminho_cache
+
+        url = f"{webhook_base_url}/static/cache/{h}.mp3"
+        print(f"✅ Áudio gerado e cacheado: {url}")
+        return url
+
+    except Exception as e:
+        print(f"❌ Erro ElevenLabs: {e}")
+        raise.
+===== ARQUIVO: C:\sofia-ai\backend\voice\__init__.py ===== 
+.
+===== requirements.txt =====  
+fastapi==0.104.1
+uvicorn==0.24.0
+python-dotenv==1.0.0
+sqlalchemy==2.0.36
+openai==1.6.1
+httpx==0.25.2
+python-multipart==0.0.6
+twilio==8.10.0
+requests==2.31.0
+elevenlabs
+psycopg2-binary
+google-auth
+google-api-python-client
