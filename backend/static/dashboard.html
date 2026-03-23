@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>FLC Bank — Painel Julia.ia</title>
+    <title>FLC Bank — Painel Julia</title>
     <link
         href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600;700&family=DM+Sans:wght@300;400;500&display=swap"
         rel="stylesheet">
@@ -429,6 +429,11 @@
         .badge-nao_atendeu {
             color: var(--red);
             border-color: rgba(248, 113, 113, .3)
+        }
+
+        .badge-callback_agendado {
+            color: #f59e0b;
+            border-color: rgba(245, 158, 11, .3)
         }
 
         .badge-sem_interesse,
@@ -863,6 +868,8 @@
         </div>
         <div class="topbar-right">
             <span id="user-info" style="font-size:10px;color:var(--gold);letter-spacing:1px"></span>
+            <a href="/painel-especialista" id="btn-painel" class="btn btn-gold"
+                style="display:none;text-decoration:none;font-size:8px;padding:5px 10px">PAINEL</a>
             <button class="btn btn-outline" onclick="loadAll()">↻</button>
             <button class="btn btn-outline" onclick="doLogout()" title="Sair">⏻</button>
         </div>
@@ -904,12 +911,16 @@
                     onclick="document.getElementById('csvInput').click()">CSV</button>
                 <input type="file" id="csvInput" accept=".csv" style="display:none" onchange="importarCSV(event)">
                 <button class="btn btn-gold master-only" onclick="abrirModalNovo()">+ LEAD</button>
+                <button class="btn btn-danger master-only" id="btn-del-sel" style="display:none"
+                    onclick="excluirSelecionados()">🗑 EXCLUIR SELECIONADOS (<span id="sel-count">0</span>)</button>
             </div>
             <div class="section-label">LEADS</div>
             <div class="table-wrap">
                 <table>
                     <thead>
                         <tr>
+                            <th style="width:30px"><input type="checkbox" id="select-all"
+                                    onchange="toggleSelectAll(this)" title="Selecionar todos"></th>
                             <th>Nome</th>
                             <th>Telefone</th>
                             <th>Stage</th>
@@ -960,6 +971,8 @@
             </div>
             <div class="section-label">REUNIÕES DE HOJE</div>
             <div id="lista-hoje"></div>
+            <div class="section-label" style="margin-top:20px">CALLBACKS PENDENTES 📞</div>
+            <div id="lista-callbacks"></div>
             <div class="section-label" style="margin-top:20px">TODAS</div>
             <div id="lista-todas"></div>
         </div>
@@ -982,6 +995,7 @@
                     <option>agendado</option>
                     <option>fechado</option>
                     <option>nao_atendeu</option>
+                    <option>callback_agendado</option>
                     <option>sem_interesse</option>
                 </select></div>
             <div id="ml-extra" style="display:none">
@@ -997,6 +1011,29 @@
                 <button class="btn btn-gold" id="ml-save" onclick="salvarLead()">SALVAR</button>
                 <button class="btn btn-outline" id="ml-call" style="display:none" onclick="ligarLead()">📞
                     LIGAR</button>
+            </div>
+        </div>
+    </div>
+    <div class="modal-overlay" id="modal-transcricao">
+        <div class="modal" style="max-width:700px">
+            <button class="modal-close"
+                onclick="document.getElementById('modal-transcricao').classList.remove('open')">✕</button>
+            <h2>📝 Transcrição da Reunião</h2>
+            <div id="mt-loading" style="text-align:center;padding:20px;color:var(--gray)">Carregando...</div>
+            <div id="mt-content" style="display:none">
+                <div class="section-label" style="margin-top:10px">RESUMO</div>
+                <div id="mt-resumo" class="conversa-box"
+                    style="max-height:200px;overflow-y:auto;white-space:pre-wrap;font-size:12px;margin-bottom:15px;background:rgba(255,255,255,0.03);padding:12px;border-radius:8px">
+                </div>
+                <div class="section-label">TRANSCRIÇÃO COMPLETA</div>
+                <div id="mt-texto" class="conversa-box"
+                    style="max-height:350px;overflow-y:auto;white-space:pre-wrap;font-size:11px;background:rgba(255,255,255,0.03);padding:12px;border-radius:8px">
+                </div>
+                <div style="margin-top:15px;display:flex;gap:10px">
+                    <a id="mt-gravacao-link" href="#" target="_blank" class="btn btn-gold"
+                        style="text-decoration:none;display:none">🎥 Assistir Gravação</a>
+                    <button class="btn btn-outline" onclick="copiarTranscricao()">📋 Copiar</button>
+                </div>
             </div>
         </div>
     </div>
@@ -1030,8 +1067,11 @@
     </div>
     <!-- ════════ USERS PAGE (master only) ════════ -->
     <div class="page" id="page-users">
-        <div class="section-label">GESTÃO DE USUÁRIOS</div>
-        <div style="margin-bottom:16px"><button class="btn btn-gold" onclick="abrirModalUser()">+ NOVO USUÁRIO</button>
+        <div class="section-label">GESTÃO DE USUÁRIOS E ESPECIALISTAS</div>
+        <div style="margin-bottom:16px;display:flex;gap:8px">
+            <button class="btn btn-gold" onclick="abrirModalUser()">+ NOVO USUÁRIO</button>
+            <a href="/painel-especialista" target="_blank" class="btn btn-outline" style="text-decoration:none">Painel
+                Especialista</a>
         </div>
         <div class="table-wrap">
             <table>
@@ -1040,13 +1080,14 @@
                         <th>Nome</th>
                         <th>E-mail</th>
                         <th>Nível</th>
+                        <th>Especialista</th>
                         <th>Status</th>
                         <th>Ações</th>
                     </tr>
                 </thead>
                 <tbody id="users-tbody">
                     <tr>
-                        <td colspan="5">
+                        <td colspan="6">
                             <div class="empty">Carregando...</div>
                         </td>
                     </tr>
@@ -1055,7 +1096,53 @@
         </div>
     </div>
     </div>
-    <!-- ════════ MODAL USUÁRIO ════════ -->
+    <!-- ════════ MODAL CONFIGURAR ESPECIALISTA ════════ -->
+    <div class="modal-overlay" id="modal-config-esp">
+        <div class="modal">
+            <button class="modal-close" onclick="fecharConfigEsp()">✕</button>
+            <h2 id="mce-title">Configurar Especialista</h2>
+            <div class="field"><label>Tipo de especialista</label>
+                <select id="mce-tipo">
+                    <option value="">Não é especialista</option>
+                    <option value="wpp">Especialista WhatsApp (atende chat)</option>
+                    <option value="reuniao">Especialista Reunião (faz reuniões)</option>
+                    <option value="ambos">Ambos (WhatsApp + Reunião)</option>
+                </select>
+            </div>
+            <div id="mce-campos" style="display:none">
+                <div class="field"><label>Título / Cargo</label><input id="mce-titulo"
+                        placeholder="Ex: Especialista em Crédito PJ"></div>
+                <div class="field"><label>Área</label><select id="mce-area">
+                        <option value="credito">Crédito</option>
+                        <option value="reestruturacao">Reestruturação de Empresa</option>
+                        <option value="geral">Geral</option>
+                    </select></div>
+                <div class="field"><label>WhatsApp pessoal (notificações)</label><input id="mce-wpp"
+                        placeholder="5551999998888"></div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-outline" onclick="fecharConfigEsp()">CANCELAR</button>
+                <button class="btn btn-gold" onclick="salvarConfigEsp()">SALVAR</button>
+            </div>
+        </div>
+    </div>
+    <!-- ════════ MODAL TRANSFERIR ════════ -->
+    <div class="modal-overlay" id="modal-transferir">
+        <div class="modal">
+            <button class="modal-close" onclick="fecharModalTransf()">✕</button>
+            <h2>Transferir para Especialista</h2>
+            <div class="field"><label>Lead</label>
+                <div id="mt-lead" style="font-size:13px;color:var(--gold)"></div>
+            </div>
+            <div class="field"><label>Especialista</label><select id="mt-esp"></select></div>
+            <div class="field"><label>Motivo (opcional)</label><input id="mt-motivo"
+                    placeholder="Ex: Cliente pediu atendimento humano"></div>
+            <div class="modal-actions">
+                <button class="btn btn-outline" onclick="fecharModalTransf()">CANCELAR</button>
+                <button class="btn btn-gold" onclick="executarTransf()">TRANSFERIR</button>
+            </div>
+        </div>
+    </div>
     <div class="modal-overlay" id="modal-user">
         <div class="modal">
             <button class="modal-close" onclick="fecharModalUser()">✕</button>
@@ -1097,14 +1184,14 @@
         function toast(m, t) { var e = document.createElement('div'); e.className = 'toast ' + (t || 'info'); e.textContent = m; document.getElementById('toasts').appendChild(e); setTimeout(function () { e.remove() }, 4000) }
         function esc(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/'/g, '&#39;') }
         function fmtTel(t) { if (!t) return '—'; var d = t.replace(/\D/g, '').replace(/^55/, ''); if (d.length === 11) return '(' + d.slice(0, 2) + ') ' + d.slice(2, 7) + '-' + d.slice(7); if (d.length === 10) return '(' + d.slice(0, 2) + ') ' + d.slice(2, 6) + '-' + d.slice(6); return t }
-        function loadAll() { loadLeads(); loadMeetings() }
+        function loadAll() { loadLeads(); loadMeetings(); loadCallbacks(); loadEspecialistas() }
         function loadLeads() { var url = API() + '/api/leads/'; dbg('Fetching: ' + url + ' (origin: ' + window.location.origin + ')'); authFetch(url).then(function (r) { dbg('Leads response: ' + r.status + ' ' + r.statusText); if (!r.ok) throw new Error('HTTP ' + r.status); return r.json() }).then(function (d) { leads = Array.isArray(d) ? d : (d.leads || d.items || []); crmStats(); crmRender(); dbg('Leads OK: ' + leads.length + ' items'); toast('Leads: ' + leads.length, 'success') }).catch(function (e) { dbg('Leads ERRO: ' + e.message + ' | URL: ' + url); toast('Erro leads: ' + e.message, 'error') }) }
         function crmStats() { var c = function (s) { return leads.filter(function (l) { return l.stage === s }).length }; document.getElementById('s-total').textContent = leads.length; document.getElementById('s-ligando').textContent = c('ligando'); document.getElementById('s-atendeu').textContent = c('atendeu'); document.getElementById('s-interessado').textContent = c('interessado'); document.getElementById('s-agendado').textContent = c('agendado'); document.getElementById('s-nao').textContent = c('nao_atendeu') }
         function crmFiltrar(s) { crmFiltro = crmFiltro === s ? '' : s; document.querySelectorAll('#crm-stats .stat').forEach(function (c) { c.classList.remove('active') }); crmRender() }
         function fmtAg(v) { if (!v) return '—'; if (v.match(/^\d{4}-\d{2}-\d{2}\s\d{2}:\d{2}/)) { var p = v.split(/[\s\-:]/); return p[2] + '/' + p[1] + ' ' + p[3] + 'h' + (p[4] !== '00' ? p[4] : '') } var d = new Date(v); if (!isNaN(d.getTime())) return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }) + ' ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }); return v }
         function crmRender() {
-            var b = document.getElementById('search').value.toLowerCase(); var ls = leads.filter(function (l) { return (!crmFiltro || l.stage === crmFiltro) && (!b || (l.name || '').toLowerCase().indexOf(b) >= 0 || (l.phone || '').indexOf(b) >= 0 || (l.wpp_phone || '').indexOf(b) >= 0) }); var tb = document.getElementById('tbody'); if (!ls.length) { tb.innerHTML = '<tr><td colspan="6"><div class="empty">Nenhum lead</div></td></tr>'; return }
-            tb.innerHTML = ls.map(function (l) { var wd = l.wpp_phone && l.wpp_phone !== l.phone; var ph = fmtTel(l.phone) + (wd ? '<br><span class="td-wpp">wpp ' + fmtTel(l.wpp_phone) + '</span>' : ''); var nm = esc(l.name || '—') + (l.company ? '<br><span style="font-size:10px;color:var(--gray)">' + esc(l.company) + '</span>' : ''); return '<tr onclick="abrirLead(\'' + l.id + '\')"><td class="td-name">' + nm + '</td><td class="td-phone">' + ph + '</td><td><span class="badge badge-' + l.stage + '">' + l.stage + '</span></td><td><span class="temp-' + (l.temperature || 'cold') + '">' + (l.temperature === 'hot' ? 'HOT' : l.temperature === 'warm' ? 'WARM' : '—') + '</span></td><td style="font-size:11px;color:var(--gold)">' + fmtAg(l.scheduled_at || l.agendado_hora) + '</td><td><div class="td-actions" onclick="event.stopPropagation()"><button class="btn-mini" onclick="ligarDireto(\'' + l.id + '\')">📞</button><button class="btn-mini" onclick="abrirLead(\'' + l.id + '\')">✏️</button><button class="btn-mini" onclick="deletarLead(\'' + l.id + '\',\'' + esc(l.name || '') + '\')">🗑</button></div></td></tr>' }).join('')
+            var b = document.getElementById('search').value.toLowerCase(); var ls = leads.filter(function (l) { return (!crmFiltro || l.stage === crmFiltro) && (!b || (l.name || '').toLowerCase().indexOf(b) >= 0 || (l.phone || '').indexOf(b) >= 0 || (l.wpp_phone || '').indexOf(b) >= 0 || (l.company || '').toLowerCase().indexOf(b) >= 0) }); var tb = document.getElementById('tbody'); if (!ls.length) { tb.innerHTML = '<tr><td colspan="7"><div class="empty">Nenhum lead</div></td></tr>'; document.getElementById('select-all').checked = false; updateSelCount(); return }
+            tb.innerHTML = ls.map(function (l) { var wd = l.wpp_phone && l.wpp_phone !== l.phone; var ph = fmtTel(l.phone) + (wd ? '<br><span class="td-wpp">wpp ' + fmtTel(l.wpp_phone) + '</span>' : ''); var pausado = l.ia_pausada; var nm = esc(l.name || '—') + (l.company ? '<br><span style="font-size:10px;color:var(--gray)">' + esc(l.company) + '</span>' : '') + (pausado ? '<br><span style="font-size:9px;color:#f59e0b;font-weight:bold">⏸️ IA PAUSADA</span>' : ''); return '<tr' + (pausado ? ' style="opacity:0.7"' : '') + '><td onclick="event.stopPropagation()"><input type="checkbox" class="lead-check" data-id="' + l.id + '" onchange="updateSelCount()"></td><td class="td-name" onclick="abrirLead(\'' + l.id + '\')">' + nm + '</td><td class="td-phone">' + ph + '</td><td><span class="badge badge-' + l.stage + '">' + l.stage + '</span></td><td><span class="temp-' + (l.temperature || 'cold') + '">' + (l.temperature === 'hot' ? 'HOT' : l.temperature === 'warm' ? 'WARM' : '—') + '</span></td><td style="font-size:11px;color:var(--gold)">' + fmtAg(l.scheduled_at || l.agendado_hora) + '</td><td><div class="td-actions" onclick="event.stopPropagation()"><button class="btn-mini" onclick="toggleIA(\'' + l.id + '\')" title="' + (pausado ? 'Ativar IA' : 'Pausar IA') + '">' + (pausado ? '▶️' : '⏸️') + '</button><button class="btn-mini" onclick="abrirTransf(\'' + l.id + '\',\'' + esc(l.name || '') + '\')" title="Transferir">🔄</button><button class="btn-mini" onclick="ligarDireto(\'' + l.id + '\')">📞</button><button class="btn-mini" onclick="abrirLead(\'' + l.id + '\')">✏️</button><button class="btn-mini" onclick="deletarLead(\'' + l.id + '\',\'' + esc(l.name || '') + '\')">🗑</button></div></td></tr>' }).join(''); document.getElementById('select-all').checked = false; updateSelCount()
         }
         function abrirModalNovo() { leadAtual = null; document.getElementById('ml-title').textContent = 'Novo Lead'; document.getElementById('ml-name').value = ''; document.getElementById('ml-company').value = ''; document.getElementById('ml-phone').value = ''; document.getElementById('ml-wpp').value = ''; document.getElementById('ml-email').value = ''; document.getElementById('ml-stage-f').style.display = 'none'; document.getElementById('ml-extra').style.display = 'none'; document.getElementById('ml-call').style.display = 'none'; document.getElementById('modal-lead').classList.add('open') }
         function abrirLead(id) { leadAtual = leads.find(function (l) { return l.id === id }); if (!leadAtual) return; document.getElementById('ml-title').textContent = leadAtual.name || 'Lead'; document.getElementById('ml-name').value = leadAtual.name || ''; document.getElementById('ml-company').value = leadAtual.company || ''; document.getElementById('ml-phone').value = leadAtual.phone || ''; document.getElementById('ml-wpp').value = leadAtual.wpp_phone || ''; document.getElementById('ml-email').value = leadAtual.email || ''; document.getElementById('ml-stage').value = leadAtual.stage || 'novo'; document.getElementById('ml-stage-f').style.display = 'block'; document.getElementById('ml-resumo').textContent = leadAtual.resumo || 'Sem resumo'; document.getElementById('ml-conv').textContent = leadAtual.conversa || 'Sem transcrição'; document.getElementById('ml-extra').style.display = 'block'; document.getElementById('ml-call').style.display = 'inline-flex'; document.getElementById('modal-lead').classList.add('open') }
@@ -1115,25 +1202,110 @@
         function dispararLote() { var i = parseInt(document.getElementById('intervalo').value) || 30; var n = leads.filter(function (l) { return l.stage === 'novo' }).length; if (!n) { toast('Nenhum lead novo', 'error'); return } if (!confirm('Disparar para ' + n + ' leads?')) return; authFetch(API() + '/api/calls/disparar-lote', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ intervalo_segundos: i }) }).then(function (r) { return r.json() }).then(function (d) { toast(d.mensagem, 'info'); setTimeout(loadLeads, 5000) }).catch(function (e) { toast(e.message, 'error') }) }
         function importarCSV(ev) { var f = ev.target.files[0]; if (!f) return; var fd = new FormData(); fd.append('file', f); authFetch(API() + '/api/leads/importar-csv', { method: 'POST', body: fd }).then(function (r) { return r.json() }).then(function (d) { toast((d.importados || 0) + ' importados', 'success'); loadLeads() }).catch(function (e) { toast('Erro: ' + e.message, 'error') }); ev.target.value = '' }
         function deletarLead(id, nm) { if (!confirm('Remover ' + nm + '?')) return; authFetch(API() + '/api/leads/' + id, { method: 'DELETE' }).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json() }).then(function () { toast(nm + ' removido', 'success'); loadLeads() }).catch(function (e) { toast('Erro: ' + e.message, 'error') }) }
+        function toggleIA(id) { authFetch(API() + '/api/leads/' + id + '/pausar-ia', { method: 'POST' }).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json() }).then(function (d) { toast(d.mensagem, 'success'); loadLeads() }).catch(function (e) { toast('Erro: ' + e.message, 'error') }) }
+
+        // ── ESPECIALISTAS ────────────────────────────────────────────────────
+        var especialistas = [];
+        function loadEspecialistas() {
+            authFetch(API() + '/api/especialistas/').then(function (r) { return r.json() }).then(function (d) {
+                especialistas = d; renderUsers();
+                if (CURRENT_USER) { var meuEsp = d.find(function (e) { return e.email === CURRENT_USER.email }); if (meuEsp) document.getElementById('btn-painel').style.display = '' }
+            }).catch(function () { })
+        }
+
+        // ── CONFIG ESPECIALISTA (dentro da aba Usuários) ─────────────────────
+        var configEspEmail = '';
+        function abrirConfigEsp(email, nome) {
+            configEspEmail = email;
+            document.getElementById('mce-title').textContent = 'Configurar: ' + nome;
+            var esp = especialistas.find(function (e) { return e.email === email });
+            var tipoSel = document.getElementById('mce-tipo');
+            var campos = document.getElementById('mce-campos');
+            if (esp) {
+                tipoSel.value = esp.area === 'reuniao' ? 'reuniao' : esp.area ? 'wpp' : '';
+                document.getElementById('mce-titulo').value = esp.titulo || '';
+                document.getElementById('mce-area').value = esp.area || 'geral';
+                document.getElementById('mce-wpp').value = esp.whatsapp || '';
+                campos.style.display = 'block';
+            } else {
+                tipoSel.value = '';
+                document.getElementById('mce-titulo').value = '';
+                document.getElementById('mce-area').value = 'geral';
+                document.getElementById('mce-wpp').value = '';
+                campos.style.display = 'none';
+            }
+            tipoSel.onchange = function () { campos.style.display = this.value ? 'block' : 'none' };
+            document.getElementById('modal-config-esp').classList.add('open');
+        }
+        function fecharConfigEsp() { document.getElementById('modal-config-esp').classList.remove('open') }
+        function salvarConfigEsp() {
+            var tipo = document.getElementById('mce-tipo').value;
+            var esp = especialistas.find(function (e) { return e.email === configEspEmail });
+
+            if (!tipo) {
+                // Remover como especialista
+                if (esp) {
+                    authFetch(API() + '/api/especialistas/' + esp.id, { method: 'DELETE' }).then(function () {
+                        toast('Especialista removido', 'success'); fecharConfigEsp(); loadEspecialistas();
+                    }).catch(function (e) { toast('Erro', 'error') });
+                } else {
+                    fecharConfigEsp();
+                }
+                return;
+            }
+
+            var titulo = document.getElementById('mce-titulo').value;
+            var area = document.getElementById('mce-area').value;
+            var wpp = document.getElementById('mce-wpp').value;
+            // Busca nome do user
+            var user = users.find(function (u) { return u.email === configEspEmail });
+            var nome = user ? user.name : '';
+
+            if (esp) {
+                // Atualizar existente
+                authFetch(API() + '/api/especialistas/' + esp.id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nome: nome, titulo: titulo, area: area, whatsapp: wpp }) }).then(function (r) { return r.json() }).then(function () { toast('Especialista atualizado!', 'success'); fecharConfigEsp(); loadEspecialistas() }).catch(function (e) { toast('Erro', 'error') });
+            } else {
+                // Criar novo
+                authFetch(API() + '/api/especialistas/', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nome: nome, titulo: titulo, area: area, whatsapp: wpp, email: configEspEmail, senha: '' }) }).then(function (r) { return r.json() }).then(function () { toast('Especialista configurado!', 'success'); fecharConfigEsp(); loadEspecialistas() }).catch(function (e) { toast('Erro', 'error') });
+            }
+        }
+
+        // ── TRANSFERIR LEAD ──────────────────────────────────────────────────
+        var transfLeadId = '';
+        function abrirTransf(leadId, leadName) { transfLeadId = leadId; document.getElementById('mt-lead').textContent = leadName || leadId; var sel = document.getElementById('mt-esp'); var areaLabel = function (a) { return a === 'credito' ? 'Crédito' : a === 'reestruturacao' ? 'Reestruturação' : 'Geral' }; sel.innerHTML = especialistas.filter(function (e) { return e.ativo }).map(function (e) { return '<option value="' + e.id + '">' + esc(e.nome) + ' — ' + areaLabel(e.area) + '</option>' }).join(''); if (!especialistas.length) sel.innerHTML = '<option>Nenhum especialista cadastrado</option>'; document.getElementById('mt-motivo').value = ''; document.getElementById('modal-transferir').classList.add('open') }
+        function fecharModalTransf() { document.getElementById('modal-transferir').classList.remove('open') }
+        function executarTransf() { var espId = document.getElementById('mt-esp').value; var motivo = document.getElementById('mt-motivo').value; if (!espId || !transfLeadId) return; authFetch(API() + '/api/especialistas/transferir', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lead_id: transfLeadId, especialista_id: espId, motivo: motivo }) }).then(function (r) { return r.json() }).then(function (d) { if (d.erro) { toast(d.erro, 'error'); return } toast(d.mensagem, 'success'); fecharModalTransf(); loadLeads() }).catch(function (e) { toast('Erro: ' + e.message, 'error') }) }
+        function toggleSelectAll(el) { document.querySelectorAll('.lead-check').forEach(function (c) { c.checked = el.checked }); updateSelCount() }
+        function updateSelCount() { var sels = document.querySelectorAll('.lead-check:checked'); var n = sels.length; document.getElementById('sel-count').textContent = n; document.getElementById('btn-del-sel').style.display = n > 0 ? 'inline-flex' : 'none' }
+        function excluirSelecionados() { var sels = document.querySelectorAll('.lead-check:checked'); var ids = []; sels.forEach(function (c) { ids.push(c.dataset.id) }); if (!ids.length) { toast('Nenhum lead selecionado', 'error'); return } if (!confirm('Excluir ' + ids.length + ' lead(s)? Essa ação não pode ser desfeita.')) return; var total = ids.length, ok = 0, erros = 0; ids.forEach(function (id) { authFetch(API() + '/api/leads/' + id, { method: 'DELETE' }).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); ok++ }).catch(function () { erros++ }).finally(function () { if (ok + erros === total) { toast(ok + ' removidos' + (erros ? ' (' + erros + ' erros)' : ''), 'success'); document.getElementById('select-all').checked = false; loadLeads() } }) }) }
         function loadMeetings() { var url = API() + '/reuniao/api/meetings'; dbg('Fetching: ' + url); authFetch(url).then(function (r) { dbg('Meetings response: ' + r.status); if (!r.ok) throw new Error('HTTP ' + r.status); return r.json() }).then(function (d) { meetings = d; agRender(); dbg('Meetings OK: ' + meetings.length + ' items') }).catch(function (e) { dbg('Meetings ERRO: ' + e.message + ' | URL: ' + url); toast('Erro agenda: ' + e.message, 'error') }) }
         function agFiltrar(s, btn) { agFiltro = s; document.querySelectorAll('#ag-filters .filter').forEach(function (b) { b.classList.remove('active') }); if (btn) btn.classList.add('active'); agRender() }
         function fmtHour(s) { try { return (s.split(' ')[1] || '—').slice(0, 5) } catch (e) { return '—' } }
         function fmtDate(s) { try { var p = s.split(' ')[0].split('-'); return p[2] + '/' + p[1] } catch (e) { return '—' } }
-        function agCard(m) { var act = m.status === 'agendado' || m.status === 'em_andamento'; var bL = { 'agendado': 'Agendada', 'em_andamento': 'Andamento', 'concluido': 'Concluída', 'cancelado': 'Cancelada' }; return '<div class="card ' + m.status + '"><div class="card-accent"></div><div class="card-time"><div class="hour">' + fmtHour(m.scheduled_at) + '</div><div class="date">' + fmtDate(m.scheduled_at) + '</div></div><div class="card-info"><div class="name">' + esc(m.lead_name || '—') + '</div><div class="meta"><span>📞 ' + (m.lead_phone || '—') + '</span><span>' + (m.tipo === 'meet' || m.tipo === 'video_chamada' ? '🎥 Vídeo' : m.tipo === 'whatsapp' ? '💬 WhatsApp' : '📞 Lig.') + '</span></div></div><div class="card-actions"><span class="badge ' + m.status + '">' + (bL[m.status] || m.status) + '</span>' + (act ? (m.link_especialista ? '<a href="' + m.link_especialista + '" target="_blank" class="btn btn-gold" style="text-decoration:none">Entrar</a>' : '') + '<button class="btn btn-outline" onclick="agOk(\'' + m.id + '\')">✓</button><button class="btn btn-danger" onclick="agDel(\'' + m.id + '\')">✕</button>' : '') + '</div></div>' }
-        function agRender() { var hoje = new Date().toISOString().split('T')[0]; var lH = meetings.filter(function (m) { return m.scheduled_at && m.scheduled_at.indexOf(hoje) === 0 && (m.status === 'agendado' || m.status === 'em_andamento') }); var lA = agFiltro === 'todos' ? meetings.filter(function (m) { return m.status === 'agendado' || m.status === 'em_andamento' }) : meetings.filter(function (m) { return m.status === agFiltro }); document.getElementById('lista-hoje').innerHTML = lH.length ? lH.map(agCard).join('') : '<div class="empty">Nenhuma reunião hoje</div>'; document.getElementById('lista-todas').innerHTML = lA.length ? lA.map(agCard).join('') : '<div class="empty">Nenhuma reunião</div>'; document.getElementById('a-hoje').textContent = lH.length; document.getElementById('a-ag').textContent = meetings.filter(function (m) { return m.status === 'agendado' }).length; document.getElementById('a-and').textContent = meetings.filter(function (m) { return m.status === 'em_andamento' }).length; document.getElementById('a-con').textContent = meetings.filter(function (m) { return m.status === 'concluido' }).length }
+        function agCard(m) { var act = m.status === 'agendado' || m.status === 'em_andamento'; var done = m.status === 'concluido'; var bL = { 'agendado': 'Agendada', 'em_andamento': 'Andamento', 'concluido': 'Concluída', 'cancelado': 'Cancelada' }; var recBtns = ''; if (done) { if (m.recording_url && m.recording_url.indexOf('http') === 0) { recBtns += '<a href="' + m.recording_url + '" target="_blank" class="btn btn-gold" style="text-decoration:none;font-size:11px;padding:4px 10px;margin-right:5px">🎥 Gravação</a>' } recBtns += '<button class="btn btn-outline" style="font-size:11px;padding:4px 10px" onclick="verTranscricao(\'' + m.id + '\')">📝 Transcrição</button>' } return '<div class="card ' + m.status + '"><div class="card-accent"></div><div class="card-time"><div class="hour">' + fmtHour(m.scheduled_at) + '</div><div class="date">' + fmtDate(m.scheduled_at) + '</div></div><div class="card-info"><div class="name">' + esc(m.lead_name || '—') + '</div><div class="meta"><span>📞 ' + (m.lead_phone || '—') + '</span><span>' + (m.tipo === 'meet' || m.tipo === 'video_chamada' ? '🎥 Vídeo' : m.tipo === 'whatsapp' ? '💬 WhatsApp' : '📞 Lig.') + '</span></div>' + (done ? '<div style="margin-top:8px">' + recBtns + '</div>' : '') + '</div><div class="card-actions"><span class="badge ' + m.status + '">' + (bL[m.status] || m.status) + '</span>' + (act ? (m.link_especialista ? '<a href="' + m.link_especialista + '" target="_blank" class="btn btn-gold" style="text-decoration:none">Entrar</a>' : '') + '<button class="btn btn-outline" onclick="agOk(\'' + m.id + '\')">✓</button><button class="btn btn-danger" onclick="agDel(\'' + m.id + '\')">✕</button>' : '') + '</div></div>' }
+        function agRender() { var hoje = new Date().toISOString().split('T')[0]; var lH = meetings.filter(function (m) { return m.scheduled_at && m.scheduled_at.indexOf(hoje) === 0 && (m.status === 'agendado' || m.status === 'em_andamento') }); var lA = agFiltro === 'todos' ? meetings : meetings.filter(function (m) { return m.status === agFiltro }); document.getElementById('lista-hoje').innerHTML = lH.length ? lH.map(agCard).join('') : '<div class="empty">Nenhuma reunião hoje</div>'; document.getElementById('lista-todas').innerHTML = lA.length ? lA.map(agCard).join('') : '<div class="empty">Nenhuma reunião</div>'; document.getElementById('a-hoje').textContent = lH.length; document.getElementById('a-ag').textContent = meetings.filter(function (m) { return m.status === 'agendado' }).length; document.getElementById('a-and').textContent = meetings.filter(function (m) { return m.status === 'em_andamento' }).length; document.getElementById('a-con').textContent = meetings.filter(function (m) { return m.status === 'concluido' }).length }
         function agOk(id) { authFetch(API() + '/reuniao/api/meetings/' + id + '/status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'concluido' }) }).then(function () { loadMeetings() }) }
         function agDel(id) { if (!confirm('Cancelar reunião?')) return; authFetch(API() + '/reuniao/api/meetings/' + id, { method: 'DELETE' }).then(function () { loadMeetings() }) }
+        var callbacks = [];
+        function loadCallbacks() { authFetch(API() + '/api/calls/callbacks').then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json() }).then(function (d) { callbacks = d; renderCallbacks() }).catch(function (e) { console.log('Callbacks erro:' + e.message) }) }
+        function cbCard(cb) { var dt = cb.scheduled_at || ''; var statusBadge = { 'pendente': 'agendado', 'executado': 'concluido', 'falhou': 'cancelado', 'cancelado': 'cancelado' }; var statusLabel = { 'pendente': 'Pendente', 'executado': 'Executado', 'falhou': 'Falhou', 'cancelado': 'Cancelado' }; return '<div class="card ' + (statusBadge[cb.status] || 'agendado') + '"><div class="card-accent"></div><div class="card-time"><div class="hour">' + fmtHour(dt) + '</div><div class="date">' + fmtDate(dt) + '</div></div><div class="card-info"><div class="name">' + esc(cb.lead_name || '—') + '</div><div class="meta"><span>📞 ' + (cb.lead_phone || '—') + '</span><span>🔄 Callback</span></div><div style="font-size:10px;color:var(--gray);margin-top:4px">' + esc(cb.motivo || '') + '</div></div><div class="card-actions"><span class="badge ' + (statusBadge[cb.status] || 'agendado') + '">' + (statusLabel[cb.status] || cb.status) + '</span>' + (cb.status === 'pendente' ? '<button class="btn btn-danger" onclick="cancelarCallback(\'' + cb.id + '\')">✕</button>' : '') + '</div></div>' }
+        function renderCallbacks() { var pendentes = callbacks.filter(function (cb) { return cb.status === 'pendente' }); document.getElementById('lista-callbacks').innerHTML = pendentes.length ? pendentes.map(cbCard).join('') : '<div class="empty">Nenhum callback pendente</div>' }
+        function cancelarCallback(id) { if (!confirm('Cancelar callback?')) return; authFetch(API() + '/api/calls/callbacks/' + id, { method: 'DELETE' }).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json() }).then(function () { toast('Callback cancelado', 'success'); loadCallbacks() }).catch(function (e) { toast('Erro: ' + e.message, 'error') }) }
+        function verTranscricao(meetingId) { document.getElementById('modal-transcricao').classList.add('open'); document.getElementById('mt-loading').style.display = 'block'; document.getElementById('mt-content').style.display = 'none'; authFetch(API() + '/reuniao/api/meetings/' + meetingId + '/transcricao').then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json() }).then(function (d) { document.getElementById('mt-loading').style.display = 'none'; document.getElementById('mt-content').style.display = 'block'; document.getElementById('mt-resumo').textContent = d.resumo || 'Resumo não disponível ainda. Aguarde o processamento.'; document.getElementById('mt-texto').textContent = d.transcricao || 'Transcrição não disponível ainda. Pode levar alguns minutos após a reunião.'; var linkEl = document.getElementById('mt-gravacao-link'); if (d.recording_url && d.recording_url.indexOf('http') === 0) { linkEl.href = d.recording_url; linkEl.style.display = 'inline-block' } else { linkEl.style.display = 'none' } }).catch(function (e) { document.getElementById('mt-loading').style.display = 'none'; document.getElementById('mt-content').style.display = 'block'; document.getElementById('mt-resumo').textContent = 'Erro ao carregar: ' + e.message; document.getElementById('mt-texto').textContent = '' }) }
+        function copiarTranscricao() { var t = document.getElementById('mt-texto').textContent; if (t) { navigator.clipboard.writeText(t); toast('Transcrição copiada!', 'success') } }
         function abrirModalReuniao() { document.getElementById('mr-nome').value = ''; document.getElementById('mr-phone').value = ''; document.getElementById('mr-data').value = ''; document.getElementById('mr-result').style.display = 'none'; document.getElementById('modal-reuniao').classList.add('open') }
         function fecharModalReuniao() { document.getElementById('modal-reuniao').classList.remove('open') }
         function criarReuniao() { var n = document.getElementById('mr-nome').value.trim(), p = document.getElementById('mr-phone').value.trim(), d = document.getElementById('mr-data').value, t = document.getElementById('mr-tipo').value; if (!n || !d) { toast('Preencha nome e data', 'error'); return } var dt = d.replace('T', ' ').slice(0, 16); authFetch(API() + '/reuniao/api/meetings', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nome: n, phone: p, scheduled_at: dt, tipo: t }) }).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json() }).then(function (data) { document.getElementById('mr-link-c').textContent = data.link_cliente || '—'; document.getElementById('mr-link-c').href = data.link_cliente || '#'; document.getElementById('mr-link-e').textContent = data.link_especialista || '—'; document.getElementById('mr-link-e').href = data.link_especialista || '#'; document.getElementById('mr-result').style.display = 'block'; toast('Reunião criada', 'success'); loadMeetings() }).catch(function (e) { toast('Erro: ' + e.message, 'error') }) }
         // ── GESTÃO DE USUÁRIOS (master only) ────────────────────────────────
         var users = [], userAtual = null;
         function loadUsers() { if (!IS_MASTER) return; authFetch(API() + '/api/auth/users').then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json() }).then(function (d) { users = d; renderUsers() }).catch(function (e) { toast('Erro users: ' + e.message, 'error') }) }
-        function renderUsers() { var tb = document.getElementById('users-tbody'); if (!users.length) { tb.innerHTML = '<tr><td colspan="5"><div class="empty">Nenhum usuário</div></td></tr>'; return } tb.innerHTML = users.map(function (u) { var roleLabel = u.role === 'master' ? '<span class="badge badge-agendado">MASTER</span>' : '<span class="badge badge-novo">ESPECIALISTA</span>'; var statusLabel = u.active ? '<span class="badge badge-agendado">Ativo</span>' : '<span class="badge badge-nao_atendeu">Inativo</span>'; return '<tr><td class="td-name">' + esc(u.name || '—') + '</td><td style="font-size:11px;color:var(--gray)">' + esc(u.email) + '</td><td>' + roleLabel + '</td><td>' + statusLabel + '</td><td><div class="td-actions"><button class="btn-mini" onclick="toggleUser(\'' + u.id + '\',' + (!u.active) + ')" title="' + (u.active ? 'Desativar' : 'Ativar') + '">' + (u.active ? '🔒' : '🔓') + '</button></div></td></tr>' }).join('') }
+        function renderUsers() { var tb = document.getElementById('users-tbody'); if (!users.length) { tb.innerHTML = '<tr><td colspan="6"><div class="empty">Nenhum usuário</div></td></tr>'; return } tb.innerHTML = users.map(function (u) { var roleLabel = u.role === 'master' ? '<span class="badge badge-agendado">MASTER</span>' : '<span class="badge badge-novo">FUNCIONÁRIO</span>'; var statusLabel = u.active ? '<span class="badge badge-agendado">Ativo</span>' : '<span class="badge badge-nao_atendeu">Inativo</span>'; var esp = especialistas.find(function (e) { return e.email === u.email }); var espLabel = '<span style="color:var(--gray);font-size:10px">—</span>'; if (esp) { var tipo = esp.area || ''; var titulo = esp.titulo || ''; espLabel = '<span style="font-size:10px;color:var(--gold)">' + esc(titulo) + '</span><br><span style="font-size:9px;color:var(--gray)">' + esc(tipo) + '</span>' } return '<tr><td class="td-name">' + esc(u.name || '—') + '</td><td style="font-size:11px;color:var(--gray)">' + esc(u.email) + '</td><td>' + roleLabel + '</td><td>' + espLabel + '</td><td>' + statusLabel + '</td><td><div class="td-actions"><button class="btn-mini" onclick="abrirConfigEsp(\'' + esc(u.email) + '\',\'' + esc(u.name || '') + '\')" title="Configurar especialista">⚙️</button><button class="btn-mini" onclick="toggleUser(\'' + u.id + '\',' + (!u.active) + ')" title="' + (u.active ? 'Desativar' : 'Ativar') + '">' + (u.active ? '🔒' : '🔓') + '</button><button class="btn-mini" onclick="resetSenhaUser(\'' + u.id + '\',\'' + esc(u.name || '') + '\')">🔑</button><button class="btn-mini" onclick="excluirUser(\'' + u.id + '\',\'' + esc(u.name || '') + '\')">🗑</button></div></td></tr>' }).join('') }
         function abrirModalUser() { userAtual = null; document.getElementById('mu-title').textContent = 'Novo Usuário'; document.getElementById('mu-name').value = ''; document.getElementById('mu-email').value = ''; document.getElementById('mu-pass').value = ''; document.getElementById('mu-role').value = 'funcionario'; document.getElementById('modal-user').classList.add('open') }
         function fecharModalUser() { document.getElementById('modal-user').classList.remove('open') }
         function salvarUser() { var n = document.getElementById('mu-name').value.trim(), em = document.getElementById('mu-email').value.trim(), p = document.getElementById('mu-pass').value, ro = document.getElementById('mu-role').value; if (!em || !p) { toast('Preencha e-mail e senha', 'error'); return } if (p.length < 6) { toast('Senha mínimo 6 caracteres', 'error'); return } authFetch(API() + '/api/auth/users', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: n, email: em, password: p, role: ro }) }).then(function (r) { if (!r.ok) return r.json().then(function (d) { var msg = typeof d.detail === 'string' ? d.detail : JSON.stringify(d.detail); throw new Error(msg || 'Erro') }); return r.json() }).then(function () { toast('Usuário criado', 'success'); fecharModalUser(); loadUsers() }).catch(function (err) { toast(err.message || 'Erro desconhecido', 'error') }) }
-        function toggleUser(id, active) { var action = active ? 'ativar' : 'desativar'; if (!confirm('Deseja ' + action + ' este usuário?')) return; authFetch(API() + '/api/auth/users/' + id, { method: active ? 'PUT' : 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ active: active }) }).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json() }).then(function () { toast('Usuário ' + action + 'do', 'success'); loadUsers() }).catch(function (err) { toast(err.message || 'Erro', 'error') }) }
+        function toggleUser(id, active) { var action = active ? 'ativar' : 'desativar'; if (!confirm('Deseja ' + action + ' este usuário?')) return; authFetch(API() + '/api/auth/users/' + id, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ active: active }) }).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json() }).then(function () { toast('Usuário ' + action + 'do', 'success'); loadUsers() }).catch(function (err) { toast(err.message || 'Erro', 'error') }) }
+        function excluirUser(id, nome) { if (!confirm('EXCLUIR PERMANENTEMENTE o usuário ' + nome + '?\n\nEssa ação NÃO pode ser desfeita!')) return; authFetch(API() + '/api/auth/users/' + id, { method: 'DELETE' }).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json() }).then(function () { toast(nome + ' excluído', 'success'); loadUsers(); loadEspecialistas() }).catch(function (err) { toast(err.message || 'Erro', 'error') }) }
+        function resetSenhaUser(id, nome) { var nova = prompt('Nova senha para ' + nome + ' (mínimo 6 caracteres):'); if (!nova || nova.length < 6) { if (nova) toast('Senha deve ter no mínimo 6 caracteres', 'error'); return } authFetch(API() + '/api/auth/reset-password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ user_id: id, new_password: nova }) }).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json() }).then(function (d) { toast(d.mensagem || 'Senha redefinida!', 'success') }).catch(function (err) { toast(err.message || 'Erro', 'error') }) }
         document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { fecharModalLead(); fecharModalReuniao(); fecharModalUser() } });
         if (IS_MASTER) loadUsers();
         loadAll();

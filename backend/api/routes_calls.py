@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Request, BackgroundTasks, Form
 from pydantic import BaseModel
 from typing import Optional
 from sqlalchemy.orm import Session
-from db.database import get_db, Lead, CallSession, Meeting, WppMensagem
+from db.database import get_db, Lead, CallSession, Meeting, WppMensagem, Callback
 from voice.dialer import fazer_ligacao
 from voice.brain import classificar_lead
 from integrations.whatsapp import enviar_whatsapp, enviar_confirmacao_agendamento, enviar_agendamento_whatsapp
@@ -38,7 +38,7 @@ def _extrair_whatsapp_da_transcricao(transcricao: str, phone_original: str = "")
             messages=[{
                 "role": "user",
                 "content": (
-                    "Analise essa transcrição de ligação. A Sofia perguntou se o número "
+                    "Analise essa transcrição de ligação. A Julia perguntou se o número "
                     "da ligação tem WhatsApp.\n\n"
                     "REGRAS:\n"
                     "- Se o cliente disse que o MESMO número tem WhatsApp → responda: MESMO\n"
@@ -102,7 +102,7 @@ def _montar_msg_nao_atendeu(nome: str) -> str:
     saudacao = f"Olá {nome.strip()}! 👋 " if nome and nome.strip() else "Olá! 👋 "
     return (
         saudacao +
-        "Aqui é a Sofia da FLC Bank. "
+        "Aqui é a Julia da FLC Bank. "
         "Tentei te ligar agora mas não consegui falar com você. "
         "Liguei porque a gente é especializada em crédito para negativados e reestruturação financeira de empresas — "
         "trabalhamos com mais de 60 instituições e conseguimos opções que banco tradicional não oferece. "
@@ -113,24 +113,32 @@ def _montar_msg_nao_atendeu(nome: str) -> str:
 def _tratar_nao_atendeu(lead, db: Session):
     """
     Centraliza a lógica de 'não atendeu'.
-    
-    ✅ CORREÇÃO PRINCIPAL: A MESMA mensagem é salva no banco E enviada no WhatsApp.
-    Antes, `enviar_whatsapp()` montava uma mensagem diferente da salva em `conversa_estado`,
-    causando desconexão entre o que o cliente recebeu e o que a IA pensava ter dito.
+    - Só envia WhatsApp na PRIMEIRA vez que não atende
+    - Máximo 3 tentativas de ligação, depois marca como sem_interesse
     """
+    # Se já tentou 3 vezes, desiste
+    if lead.call_attempts >= 3:
+        lead.stage = "sem_interesse"
+        lead.resumo = (lead.resumo or "") + " | Não atendeu após 3 tentativas"
+        db.commit()
+        print(f"🚫 {lead.name} — 3 tentativas sem atender, marcado sem_interesse")
+        return
+
     lead.stage     = "nao_atendeu"
     lead.wpp_etapa = "pos_ligacao"
 
-    msg_inicial = _montar_msg_nao_atendeu(lead.name)
+    # Só envia WhatsApp na PRIMEIRA vez
+    if lead.call_attempts <= 1:
+        msg_inicial = _montar_msg_nao_atendeu(lead.name)
 
-    # Salva na tabela wpp_mensagens (fonte da verdade)
-    _salvar_msg_wpp(lead.id, "assistant", msg_inicial, db)
+        # Salva na tabela wpp_mensagens (fonte da verdade)
+        _salvar_msg_wpp(lead.id, "assistant", msg_inicial, db)
 
-    # Mantém conversa_estado como backup
-    lead.conversa_estado = json.dumps(
-        [{"role": "assistant", "content": msg_inicial}],
-        ensure_ascii=False
-    )
+        # Mantém conversa_estado como backup
+        lead.conversa_estado = json.dumps(
+            [{"role": "assistant", "content": msg_inicial}],
+            ensure_ascii=False
+        )
 
     db.commit()
 
@@ -189,7 +197,11 @@ async def disparar_lote(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
 ):
-    query = db.query(Lead).filter(Lead.stage == "novo")
+    # Só liga pra leads NOVOS que NUNCA foram ligados
+    query = db.query(Lead).filter(
+        Lead.stage == "novo",
+        Lead.call_attempts == 0,
+    ).order_by(Lead.created_at.desc())
     if dados.limite:
         query = query.limit(dados.limite)
     leads = query.all()
@@ -214,7 +226,7 @@ async def _executar_lote(lead_ids: list, intervalo: int):
     try:
         for i, lead_id in enumerate(lead_ids):
             lead = db.get(Lead, lead_id)
-            if not lead or lead.stage != "novo":
+            if not lead or lead.stage != "novo" or lead.call_attempts > 0:
                 continue
             try:
                 print(f"📞 Lote [{i+1}/{len(lead_ids)}] — {lead.name} ({lead.phone})")
@@ -262,7 +274,7 @@ async def pos_chamada(request: Request, db: Session = Depends(get_db)):
         return {"ok": True, "aviso": "Lead não encontrado"}
 
     # ── NÃO ATENDEU ──────────────────────────────────────────────────────
-    if duracao < 25 or status in ("no-answer", "busy", "failed"):
+    if duracao < 15 or status in ("no-answer", "busy", "failed"):
         _tratar_nao_atendeu(lead, db)
         print(f"📵 {lead.name} não atendeu ({duracao}s / status: {status})")
         return {"ok": True, "acao": "nao_atendeu"}
@@ -276,7 +288,7 @@ async def pos_chamada(request: Request, db: Session = Depends(get_db)):
         if not content:
             continue
         historico.append({"role": role, "content": content})
-        quem = "Cliente" if role == "user" else "Sofia"
+        quem = "Cliente" if role == "user" else "Julia"
         transcricao_texto += f"{quem}: {content}\n"
 
     # ── Cliente não falou nada ───────────────────────────────────────────
@@ -285,6 +297,54 @@ async def pos_chamada(request: Request, db: Session = Depends(get_db)):
         _tratar_nao_atendeu(lead, db)
         print(f"📵 {lead.name} não falou nada — marcado como nao_atendeu")
         return {"ok": True, "acao": "nao_atendeu"}
+
+    # ── Detecta ROBÔ / URA / CAIXA POSTAL ────────────────────────────────
+    transcricao_lower = transcricao_texto.lower()
+    palavras_robo = [
+        "disque", "pressione", "tecle", "opção", "opcao",
+        "para falar com", "menu", "ramal",
+        "bem-vindo", "bem vindo", "central de atendimento",
+        "ligação gravada", "ligacao gravada",
+        "deixe sua mensagem", "após o sinal", "apos o sinal",
+        "caixa postal", "voicemail", "não está disponível",
+        "nao esta disponivel", "a chamada será", "a chamada sera",
+        "aguarde enquanto", "transferindo",
+        "no momento", "ligue mais tarde", "chamada encaminhada",
+        "número discado", "numero discado",
+        "número chamado", "numero chamado",
+        "caixa de mensagem", "grave sua mensagem",
+        "a operadora informa", "fora da área", "fora da area",
+        "não completou", "nao completou",
+        # Caixas postais brasileiras
+        "vamos entregar o seu recado",
+        "entregar seu recado", "entregar o recado",
+        "deixe seu recado", "grave seu recado",
+        "após o sinal grave", "apos o sinal grave",
+        "celular chamado", "celular está",
+        "não pode atender", "nao pode atender",
+        "desligado ou fora", "fora de cobertura",
+        "fora da area de cobertura", "fora da área de cobertura",
+        "não foi possível completar", "nao foi possivel completar",
+        "gravar mensagem", "grave sua mensagem",
+    ]
+    eh_robo = any(p in transcricao_lower for p in palavras_robo)
+    
+    # Chamadas curtas (<20s) com 1 turno do cliente = provável caixa postal
+    if not eh_robo and duracao < 20 and len(user_falas) <= 1:
+        fala_user = user_falas[0]["content"].lower() if user_falas else ""
+        # Robôs/voicemail falam textos longos ou têm frases padrão
+        if len(fala_user) > 60:
+            eh_robo = True
+    
+    # Chamadas curtas (<20s) com só 1-2 mensagens no total = não conversou
+    if not eh_robo and duracao < 20 and len(historico) <= 2:
+        eh_robo = True
+        print(f"🤖 Detectado por duração curta + poucas mensagens")
+    
+    if eh_robo:
+        _tratar_nao_atendeu(lead, db)
+        print(f"🤖 {lead.name} — ROBÔ/URA/CAIXA POSTAL detectado ({duracao}s, {len(historico)} msgs)")
+        return {"ok": True, "acao": "robo_detectado"}
 
     # ── Classificação ────────────────────────────────────────────────────
     print(f"🧠 Classificando {lead.name} ({duracao}s de conversa)...")
@@ -309,9 +369,52 @@ async def pos_chamada(request: Request, db: Session = Depends(get_db)):
 
     temp = classificacao.get("temperatura", "cold")
 
-    if temp in ("hot", "warm") or duracao >= 60:
+    # ── CALLBACK: Detecta se cliente pediu pra ligar depois ──────────────
+    from api.callback_scheduler import _extrair_callback_da_transcricao, agendar_callback
+    callback_info = _extrair_callback_da_transcricao(transcricao_texto, lead.name or "")
+    if callback_info and callback_info.get("callback"):
+        horario = callback_info.get("horario", "")
+        periodo = callback_info.get("periodo", "hoje")
+        motivo = callback_info.get("motivo", "cliente pediu pra ligar depois")
+        cb = agendar_callback(lead.id, horario, periodo, motivo, db)
+        if cb:
+            lead.stage = "callback_agendado"
+            lead.resumo = classificacao.get("resumo", "") + f" | CALLBACK: ligar às {horario} ({periodo})"
+            lead.conversa = transcricao_texto
+            lead.updated_at = datetime.utcnow()
+
+            # ── Envia WhatsApp avisando sobre o callback ──────────────
+            from integrations.whatsapp import _enviar
+            wpp_num = _get_wpp_phone(lead)
+            dia_txt = "hoje" if periodo == "hoje" else "amanhã"
+            nome = lead.name or ""
+            msg_callback = (
+                f"Oi{' ' + nome if nome else ''}! 😊 Aqui é a Julia da FLC Bank.\n\n"
+                f"Conforme combinamos, vou te ligar {dia_txt} às {horario}.\n\n"
+                f"Se preferir, podemos conversar por aqui mesmo pelo WhatsApp! "
+                f"É só me responder. 💬"
+            )
+            _enviar(wpp_num, msg_callback)
+            _salvar_msg_wpp(lead.id, "assistant", msg_callback, db)
+            lead.wpp_etapa = "conversa"
+
+            sessao = CallSession(
+                lead_id      = lead.id,
+                twilio_sid   = conversation_id,
+                status       = status,
+                duration_sec = int(duracao),
+                transcript   = transcricao_texto,
+                resumo       = lead.resumo,
+                resultado    = "callback"
+            )
+            db.add(sessao)
+            db.commit()
+            print(f"📅 {lead.name} pediu callback às {horario} ({periodo}) — agendado!")
+            return {"ok": True, "stage": "callback_agendado", "callback_horario": horario}
+
+    if temp in ("hot", "warm"):
         lead.stage     = "interessado"
-        lead.wpp_etapa = "aguardando_tipo"
+        lead.wpp_etapa = "conversa"
 
         # Salva contexto da ligação como nota interna
         resumo_ctx = classificacao.get("resumo", "")
@@ -327,10 +430,10 @@ async def pos_chamada(request: Request, db: Session = Depends(get_db)):
         saudacao = f"Olá {lead.name}! 😊 " if lead.name else "Olá! 😊 "
         msg_agendamento = (
             saudacao +
-            "Aqui é a Sofia da FLC Bank. "
-            "Foi ótimo conversar com você! "
-            "Vamos marcar sua reunião? "
-            "Prefere por ligação telefônica (1) ou vídeo chamada (2)?"
+            "Aqui é a Julia da FLC Bank. "
+            "Foi ótimo conversar com você! 😊\n\n"
+            "Vamos prosseguir para o agendamento ou ficou com alguma dúvida sobre o que conversamos? "
+            "Pode me perguntar aqui que eu te ajudo!"
         )
         _salvar_msg_wpp(lead.id, "assistant", msg_agendamento, db)
         enviar_agendamento_whatsapp(numero_wpp, lead.name, mensagem=msg_agendamento)
@@ -416,3 +519,43 @@ async def verificar_agenda(request: Request, db: Session = Depends(get_db)):
         "mensagem": f"Horário ocupado. Próximos disponíveis: {', '.join(livres)}",
         "proximos_horarios": livres
     }
+
+
+# ── CALLBACKS ─────────────────────────────────────────────────────────────────
+
+@router.get("/callbacks")
+def listar_callbacks(db: Session = Depends(get_db)):
+    """Lista todos os callbacks pendentes e recentes."""
+    from datetime import timedelta
+    limite = datetime.utcnow() - timedelta(days=7)
+    callbacks = (
+        db.query(Callback)
+        .filter(Callback.created_at >= limite)
+        .order_by(Callback.scheduled_at.desc())
+        .all()
+    )
+    resultado = []
+    for cb in callbacks:
+        lead = db.get(Lead, cb.lead_id)
+        resultado.append({
+            "id": cb.id,
+            "lead_id": cb.lead_id,
+            "lead_name": lead.name if lead else "—",
+            "lead_phone": lead.phone if lead else "—",
+            "scheduled_at": cb.scheduled_at.strftime("%Y-%m-%d %H:%M") if cb.scheduled_at else "",
+            "status": cb.status,
+            "motivo": cb.motivo,
+            "tentativas": cb.tentativas,
+            "created_at": str(cb.created_at),
+        })
+    return resultado
+
+
+@router.delete("/callbacks/{callback_id}")
+def cancelar_callback(callback_id: str, db: Session = Depends(get_db)):
+    cb = db.get(Callback, callback_id)
+    if not cb:
+        return {"erro": "Callback não encontrado"}
+    cb.status = "cancelado"
+    db.commit()
+    return {"mensagem": "Callback cancelado"}

@@ -262,6 +262,8 @@ def _extrair_nome(texto: str) -> str:
         r'(?:pode\s+)?me\s+chamar?\s+de\s+',
         r'meu\s+nome\s+(?:é|e|eh)\s+',
         r'me\s+chamo\s+',
+        r'(?:tá|ta|está|esta)\s+(?:falando|falano)\s+com\s+(?:o|a)?\s*',
+        r'(?:fala|falando)\s+com\s+(?:o|a)?\s*',
         r'quem\s+fala\s+(?:é|e|eh)\s+',
         r'aqui\s+(?:é|e|eh)\s+(?:o|a)?\s*',
         r'(?:é|e|eh)\s+(?:o|a)\s+',
@@ -269,6 +271,8 @@ def _extrair_nome(texto: str) -> str:
         r'eu\s+sou\s+',
         r'sou\s+(?:o|a)\s+',
         r'sou\s+',
+        r'com\s+(?:o|a)\s+',
+        r'com\s+',
     ]
     for pat in expressoes:
         t = re.sub(r'^' + pat, '', t, flags=re.IGNORECASE).strip()
@@ -562,9 +566,9 @@ from prompts.loader import carregar_conhecimento
 # Regras específicas do WhatsApp (não existem nos .txt porque são do canal)
 SOFIA_WPP_REGRAS = """
 IDENTIDADE OBRIGATÓRIA:
-- Seu nome é Julia.ia (NÃO Sofia, NÃO outro nome)
+- Seu nome é Julia (NÃO Sofia, NÃO outro nome)
 - Você é consultora da FLC Bank
-- SEMPRE se apresente como "Julia.ia da FLC Bank"
+- SEMPRE se apresente como "Julia da FLC Bank"
 - NUNCA use o nome Sofia em nenhuma circunstância
 
 REGRAS DO WHATSAPP (específicas deste canal):
@@ -1084,6 +1088,12 @@ async def _processar(texto: str, numero: str, lead, estado: dict, db):
     _salvar_msg(lead.id, "user", texto, db)
     estado["historico"].append({"role": "user", "content": texto})
 
+    # ── IA PAUSADA — salva msg mas não responde ──────────────────────────
+    if getattr(lead, "ia_pausada", False):
+        _save_estado(lead, estado, db)
+        print(f"⏸️ IA pausada para {lead.name} — mensagem salva, sem resposta automática")
+        return
+
     stage = lead.stage or "novo"
     etapa = estado.get("etapa", "conversa")
     nome  = lead.name or ""
@@ -1094,7 +1104,7 @@ async def _processar(texto: str, numero: str, lead, estado: dict, db):
     if etapa == "aguardando_nome":
         if len(estado["historico"]) == 1:
             msg_sofia = (
-                "Olá! 👋 Aqui é a Julia.ia da FLC Bank. "
+                "Olá! 👋 Aqui é a Julia da FLC Bank. "
                 "Com quem tenho o prazer de falar?"
             )
             _salvar_msg(lead.id, "assistant", msg_sofia, db)
@@ -1154,8 +1164,7 @@ async def _processar(texto: str, numero: str, lead, estado: dict, db):
             resp = _sofia_ia(
                 estado["historico"],
                 f"O cliente disse que se chama {nome_final}. "
-                "Cumprimente-o pelo nome, apresente a FLC Bank brevemente "
-                "(hub de crédito para negativados e reestruturação de empresas) "
+                "Cumprimente-o pelo nome, apresente-se como Julia da FLC Bank "
                 "e pergunte o que ele precisa. Máximo 2 frases.",
                 lead=lead
             )
@@ -1183,16 +1192,16 @@ async def _processar(texto: str, numero: str, lead, estado: dict, db):
                 saudacao = (f"Olá {nome}! 😊 " if nome else "Olá! 😊 ")
                 msg_ab = (
                     saudacao +
-                    "Aqui é a Julia.ia da FLC Bank. "
-                    "Foi ótimo conversar com você! "
-                    "Vamos marcar sua reunião? "
-                    "Prefere por ligação telefônica (1) ou vídeo chamada (2)?"
+                    "Aqui é a Julia da FLC Bank. "
+                    "Foi ótimo conversar com você! 😊\n\n"
+                    "Vamos prosseguir para o agendamento ou ficou com alguma dúvida sobre o que conversamos? "
+                    "Pode me perguntar aqui que eu te ajudo!"
                 )
                 estado["historico"].insert(-1, {"role": "assistant", "content": msg_ab})
 
             if etapa not in ("aguardando_tipo", "aguardando_dia", "aguardando_turno", "aguardando_horario", "confirmar", "concluido"):
-                estado["etapa"] = "aguardando_tipo"
-                etapa = "aguardando_tipo"
+                estado["etapa"] = "conversa"
+                etapa = "conversa"
 
         # FLUXO 2: NÃO ATENDEU
         elif stage == "nao_atendeu":
@@ -1205,7 +1214,7 @@ async def _processar(texto: str, numero: str, lead, estado: dict, db):
                 saudacao = (f"Olá {nome}! 👋 " if nome else "Olá! 👋 ")
                 msg_ab = (
                     saudacao +
-                    "Aqui é a Julia.ia da FLC Bank. "
+                    "Aqui é a Julia da FLC Bank. "
                     "Tentei te ligar agora mas não consegui falar com você. "
                     "Liguei porque a gente é especializada em crédito para negativados e reestruturação financeira de empresas — "
                     "trabalhamos com mais de 60 instituições e conseguimos opções que banco tradicional não oferece. "
@@ -1225,19 +1234,50 @@ async def _processar(texto: str, numero: str, lead, estado: dict, db):
             saudacao = (f"Olá {nome}! 👋 " if nome else "Olá! 👋 ")
             msg_ab = (
                 saudacao +
-                "Aqui é a Julia.ia da FLC Bank. "
+                "Aqui é a Julia da FLC Bank. "
                 f"Sua reunião está confirmada{info}. "
                 "Posso te ajudar com mais alguma coisa?"
             )
             estado["historico"].insert(-1, {"role": "assistant", "content": msg_ab})
+
+        # CALLBACK AGENDADO
+        elif stage == "callback_agendado":
+            from db.database import Callback
+            cb = (
+                db.query(Callback)
+                .filter(Callback.lead_id == lead.id, Callback.status == "pendente")
+                .first()
+            )
+            if cb:
+                hora_cb = cb.scheduled_at.strftime("%H:%M") if cb.scheduled_at else ""
+                saudacao = (f"Oi {nome}! 😊 " if nome else "Oi! 😊 ")
+                msg_ab = (
+                    saudacao +
+                    "Aqui é a Julia da FLC Bank. "
+                    f"Conforme combinamos, tenho uma ligação marcada pra você às {hora_cb}.\n\n"
+                    "Se quiser mudar o horário, é só me falar aqui! "
+                    "Ou se preferir, podemos conversar por aqui mesmo pelo WhatsApp. 💬"
+                )
+            else:
+                saudacao = (f"Oi {nome}! 😊 " if nome else "Oi! 😊 ")
+                msg_ab = (
+                    saudacao +
+                    "Aqui é a Julia da FLC Bank. "
+                    "Como posso te ajudar? 😊"
+                )
+            estado["historico"].insert(-1, {"role": "assistant", "content": msg_ab})
+            if etapa not in ("aguardando_tipo", "aguardando_dia", "aguardando_turno", "aguardando_horario", "confirmar", "concluido"):
+                estado["etapa"] = "conversa"
+                etapa = "conversa"
 
         # FLUXO 3: EXTERNO
         else:
             saudacao = (f"Olá {nome}! 👋 " if nome else "Olá! 👋 ")
             msg_ab = (
                 saudacao +
-                "Aqui é a Julia.ia da FLC Bank. "
-                "Somos um hub de crédito especializado em negativados e reestruturação de empresas. "
+                "Aqui é a Julia da FLC Bank. "
+                "A gente ajuda clientes que precisam de crédito, inclusive negativados, "
+                "além de atuar com créditos para empresas e para pessoas físicas. "
                 "Me conta o que você precisa? 😊"
             )
             estado["historico"].insert(-1, {"role": "assistant", "content": msg_ab})
@@ -1791,6 +1831,274 @@ async def _processar(texto: str, numero: str, lead, estado: dict, db):
         _save_estado(lead, estado, db)
         return
 
+    # ─────────────────────────────────────────────────────────────────────────
+    # ✅ INTERCEPTOR CALLBACK — detecta remarcação de horário
+    # ─────────────────────────────────────────────────────────────────────────
+    if lead.stage == "callback_agendado":
+        from db.database import Callback
+        import re
+        
+        # Detecta horário na mensagem (ex: 17h, 15:30, às 14, 9 horas)
+        tem_horario = re.search(r'(\d{1,2})\s*(?::|h|hrs?|horas?)\s*(\d{0,2})', t_lower)
+        
+        # Palavras que indicam remarcação
+        quer_remarcar = tem_horario or any(p in t_lower for p in [
+            "muda", "mudar", "mudou", "trocar", "troca",
+            "remarcar", "remarca", "reagendar", "reagenda",
+            "outro horário", "outro horario", "diferente",
+            "não vai dar", "nao vai dar", "não posso", "nao posso",
+            "me liga", "liga às", "liga as", "liga pra",
+            "pode ser", "prefiro",
+            "manhã", "manha", "amanhã", "amanha",
+            "mais tarde", "mais cedo",
+        ])
+        
+        quer_cancelar = any(p in t_lower for p in [
+            "cancelar", "cancela", "não quero", "nao quero",
+            "desistir", "desisto", "não precisa", "nao precisa",
+            "esquece", "deixa pra lá", "deixa pra la",
+        ])
+        
+        quer_conversar_wpp = any(p in t_lower for p in [
+            "conversar aqui", "por aqui", "pelo whatsapp", "pelo wpp",
+            "prefiro aqui", "pode ser aqui", "vamos conversar",
+            "por aqui mesmo", "aqui mesmo",
+        ])
+        
+        if quer_cancelar:
+            cb = db.query(Callback).filter(
+                Callback.lead_id == lead.id, Callback.status == "pendente"
+            ).first()
+            if cb:
+                cb.status = "cancelado"
+                db.commit()
+            
+            _salvar_msg(lead.id, "user", texto, db)
+            estado["historico"].append({"role": "user", "content": texto})
+            _responder(numero,
+                "Sem problema! Cancelei a ligação. 😊\n\n"
+                "Se mudar de ideia, é só me chamar por aqui. Tenha um ótimo dia!",
+                lead.id, estado, db)
+            lead.stage = "sem_interesse"
+            _save_estado(lead, estado, db)
+            db.commit()
+            return
+        
+        elif quer_conversar_wpp:
+            cb = db.query(Callback).filter(
+                Callback.lead_id == lead.id, Callback.status == "pendente"
+            ).first()
+            if cb:
+                cb.status = "cancelado"
+                db.commit()
+            
+            _salvar_msg(lead.id, "user", texto, db)
+            estado["historico"].append({"role": "user", "content": texto})
+            lead.stage = "interessado"
+            lead.wpp_etapa = "conversa"
+            estado["etapa"] = "conversa"
+            _responder(numero,
+                "Claro, podemos conversar por aqui mesmo! 💬\n\n"
+                "Me conta, qual é a sua maior necessidade hoje?",
+                lead.id, estado, db)
+            _save_estado(lead, estado, db)
+            db.commit()
+            return
+        
+        elif quer_remarcar:
+            _salvar_msg(lead.id, "user", texto, db)
+            estado["historico"].append({"role": "user", "content": texto})
+            
+            periodo_amanha = any(p in t_lower for p in ["amanhã", "amanha"])
+            
+            if tem_horario:
+                hora = int(tem_horario.group(1))
+                minuto = int(tem_horario.group(2)) if tem_horario.group(2) else 0
+                horario_novo = f"{hora:02d}:{minuto:02d}"
+                periodo = "amanha" if periodo_amanha else "hoje"
+                
+                # Cancela callback antigo
+                cb = db.query(Callback).filter(
+                    Callback.lead_id == lead.id, Callback.status == "pendente"
+                ).first()
+                if cb:
+                    cb.status = "cancelado"
+                    db.commit()
+                
+                # Cria novo callback
+                from api.callback_scheduler import agendar_callback
+                novo_cb = agendar_callback(lead.id, horario_novo, periodo, f"Remarcado pelo WhatsApp: {texto[:60]}", db)
+                
+                dia_txt = "amanhã" if periodo == "amanha" else "hoje"
+                if novo_cb:
+                    _responder(numero,
+                        f"Combinado! Alterei pra {dia_txt} às {horario_novo}. ✅\n\n"
+                        f"Se precisar mudar de novo, é só me falar! 😊",
+                        lead.id, estado, db)
+                    print(f"🔄 Callback remarcado: {lead.name} → {dia_txt} {horario_novo}")
+                else:
+                    _responder(numero,
+                        f"Anotei! Vou te ligar {dia_txt} às {horario_novo}. ✅",
+                        lead.id, estado, db)
+                
+                _save_estado(lead, estado, db)
+                return
+            else:
+                # Quer remarcar mas não deu horário — pergunta
+                _responder(numero,
+                    "Claro, posso remarcar! Que horário fica melhor pra você? 😊",
+                    lead.id, estado, db)
+                _save_estado(lead, estado, db)
+                return
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # ✅ INTERCEPTOR TRANSFERÊNCIA — cliente pede pra falar com humano
+    # ─────────────────────────────────────────────────────────────────────────
+    palavras_transferir = [
+        "falar com alguém", "falar com alguem", "falar com uma pessoa",
+        "falar com humano", "atendente humano", "pessoa real",
+        "quero falar com", "preciso falar com",
+        "passar pra alguém", "passar pra alguem",
+        "transferir", "atendente", "atendimento humano",
+        "falar com especialista", "falar com consultor",
+        "não quero falar com robô", "nao quero falar com robo",
+        "você é robô", "voce e robo", "é uma ia", "e uma ia",
+        "quero suporte", "suporte humano",
+    ]
+    quer_humano = any(p in t_lower for p in palavras_transferir)
+
+    if quer_humano and not getattr(lead, "ia_pausada", False):
+        _salvar_msg(lead.id, "user", texto, db)
+        estado["historico"].append({"role": "user", "content": texto})
+
+        # Detecta área com base no contexto da conversa
+        from db.database import Especialista, Transferencia
+
+        palavras_credito = [
+            "crédito", "credito", "empréstimo", "emprestimo", "financiamento",
+            "capital de giro", "antecipação", "antecipacao", "recebíveis",
+            "recebiveis", "taxa", "juros", "parcela", "valor", "dinheiro",
+            "pegar emprestado", "precisando de grana", "preciso de dinheiro",
+            "home equity", "imóvel", "imovel", "garantia",
+        ]
+        palavras_reestruturacao = [
+            "reestruturação", "reestruturacao", "dívida", "divida",
+            "renegociar", "renegociação", "renegociacao", "negativado",
+            "nome sujo", "serasa", "spc", "recuperação", "recuperacao",
+            "falência", "falencia", "recuperação judicial", "endividado",
+            "reorganizar", "passivo", "credores",
+        ]
+
+        # Analisa texto atual + resumo + produto do lead
+        contexto_analise = (
+            f"{texto} {lead.resumo or ''} {lead.product or ''} "
+            f"{' '.join([h.get('content','') for h in estado.get('historico',[])[-5:]])}"
+        ).lower()
+
+        area_detectada = "geral"
+        score_credito = sum(1 for p in palavras_credito if p in contexto_analise)
+        score_reestruturacao = sum(1 for p in palavras_reestruturacao if p in contexto_analise)
+
+        if score_reestruturacao > score_credito and score_reestruturacao > 0:
+            area_detectada = "reestruturacao"
+        elif score_credito > 0:
+            area_detectada = "credito"
+
+        # Busca especialista da área certa (menos atendimentos)
+        esp = (
+            db.query(Especialista)
+            .filter(Especialista.ativo == True, Especialista.area == area_detectada)
+            .order_by(Especialista.atendimentos_ativos.asc())
+            .first()
+        )
+
+        # Fallback: se não tem da área, tenta "geral"
+        if not esp and area_detectada != "geral":
+            esp = (
+                db.query(Especialista)
+                .filter(Especialista.ativo == True, Especialista.area == "geral")
+                .order_by(Especialista.atendimentos_ativos.asc())
+                .first()
+            )
+
+        # Fallback final: qualquer especialista disponível
+        if not esp:
+            esp = (
+                db.query(Especialista)
+                .filter(Especialista.ativo == True)
+                .order_by(Especialista.atendimentos_ativos.asc())
+                .first()
+            )
+
+        print(f"🎯 Área detectada: {area_detectada} | Especialista: {esp.nome if esp else 'NENHUM'}")
+
+        if esp:
+            # Pausa IA e atribui especialista
+            lead.ia_pausada = True
+            lead.especialista_id = esp.id
+            lead.wpp_etapa = "aguardando_especialista"
+
+            # Monta contexto
+            contexto = (
+                f"Nome: {lead.name or '—'}\n"
+                f"Telefone: {lead.phone}\n"
+                f"Empresa: {getattr(lead, 'company', '') or '—'}\n"
+                f"Produto: {lead.product or '—'}\n"
+                f"Valor: {lead.desired_value or '—'}\n"
+                f"Temperatura: {lead.temperature or '—'}\n"
+                f"Resumo: {lead.resumo or '—'}\n"
+            )
+
+            # Cria transferência
+            transf = Transferencia(
+                lead_id=lead.id,
+                especialista_id=esp.id,
+                motivo="Cliente pediu atendimento humano",
+                contexto=contexto,
+            )
+            db.add(transf)
+            esp.atendimentos_ativos = (esp.atendimentos_ativos or 0) + 1
+
+            # Avisa cliente com nome do especialista
+            titulo_esp = esp.titulo or "Especialista"
+            _responder(numero,
+                f"Claro! Vou te passar para o profissional mais indicado pra te ajudar. "
+                f"Ele já tem todo o contexto da nossa conversa, aguarda só um momentinho! 😊",
+                lead.id, estado, db)
+
+            # Notifica especialista no WhatsApp pessoal
+            if esp.whatsapp:
+                try:
+                    notif = (
+                        f"🔔 Novo atendimento!\n\n"
+                        f"Cliente: {lead.name or '—'}\n"
+                        f"Telefone: {lead.phone}\n"
+                        f"Produto: {lead.product or '—'}\n"
+                        f"Resumo: {lead.resumo or '—'}\n\n"
+                        f"Acesse o painel pra responder:\n"
+                        f"{os.getenv('WEBHOOK_BASE_URL', '')}/painel-especialista"
+                    )
+                    _enviar(esp.whatsapp, notif)
+                    print(f"📱 Notificação enviada pro especialista {esp.nome} ({esp.whatsapp})")
+                except Exception as e:
+                    print(f"⚠️ Erro ao notificar especialista: {e}")
+
+            _save_estado(lead, estado, db)
+            db.commit()
+            print(f"🔄 {lead.name} transferido automaticamente para {esp.nome} ({esp.titulo})")
+        else:
+            # Nenhum especialista disponível — avisa cliente
+            _responder(numero,
+                "No momento nossos especialistas estão ocupados. "
+                "Vou anotar aqui e assim que um estiver disponível, ele vai entrar em contato! 😊",
+                lead.id, estado, db)
+            lead.ia_pausada = True
+            lead.wpp_etapa = "aguardando_especialista"
+            _save_estado(lead, estado, db)
+            db.commit()
+            print(f"⚠️ {lead.name} pediu humano mas nenhum especialista disponível")
+        return
+
     # ✅ CORREÇÃO: Se o cliente escolhe tipo de reunião na conversa livre
     # (porque a IA perguntou por conta própria), redireciona direto
     escolheu_video = any(w in t_lower for w in ["video", "vídeo", "chamada de vídeo", "videochamada"])
@@ -1862,8 +2170,11 @@ async def _processar(texto: str, numero: str, lead, estado: dict, db):
     elif stage == "interessado":
         ctx = (
             f"CONTEXTO: {nome} já conversou na ligação e demonstrou interesse. "
-            "NÃO se reapresente. Responda dúvidas sobre produtos. "
-            "Só sugira reunião se o cliente pedir ou demonstrar que quer avançar. "
+            "NÃO se reapresente. Responda dúvidas sobre produtos com naturalidade. "
+            "Se o cliente disser que não tem dúvidas ou que está tudo certo, "
+            "sugira a reunião com o especialista: "
+            "'Ótimo! Então posso marcar uma conversa rápida com nosso especialista? "
+            "É gratuita e leva menos de 5 minutos.' "
             "NUNCA diga 'vou agendar' ou marque dia/hora. Máximo 2 frases."
         )
     elif stage == "nao_atendeu":

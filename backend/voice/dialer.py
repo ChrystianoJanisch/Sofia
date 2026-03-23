@@ -46,13 +46,18 @@ def fazer_ligacao(phone: str, nome: str = "") -> str:
         "agent_id": ELEVENLABS_AGENT_ID,
         "agent_phone_number_id": ELEVENLABS_PHONE_NUMBER_ID,
         "to_number": numero,
+        "telephony_call_config": {
+            "ringing_timeout_secs": 20
+        },
         "twilio_params": {
-            "timeout": "10",
-            "machine_detection": "Enable",
-            "machine_detection_timeout": "5",
-            "machine_detection_speech_threshold": "2400",
-            "machine_detection_speech_end_threshold": "1200",
-            "machine_detection_silence_timeout": "5000"
+            "machine_detection": "DetectMessageEnd",
+            "machine_detection_timeout": "3",
+            "machine_detection_speech_threshold": "1800",
+            "machine_detection_speech_end_threshold": "800",
+            "machine_detection_silence_timeout": "3000",
+            "async_amd": "true",
+            "async_amd_status_callback": (os.getenv("WEBHOOK_BASE_URL", "") + "/api/calls/amd-status"),
+            "async_amd_status_callback_method": "POST"
         },
         "conversation_initiation_client_data": {
             "dynamic_variables": {

@@ -3,7 +3,7 @@ from fastapi import UploadFile, File
 from pydantic import BaseModel
 from typing import Optional
 from sqlalchemy.orm import Session
-from db.database import get_db, Lead, CallSession, Meeting, WppMensagem, normalizar_telefone
+from db.database import get_db, Lead, CallSession, Meeting, WppMensagem, Callback, normalizar_telefone
 from datetime import datetime
 import csv, io
 
@@ -62,6 +62,7 @@ def listar_leads(db: Session = Depends(get_db)):
             "especialista": l.especialista,
             "call_attempts": l.call_attempts,
             "last_call_at": str(l.last_call_at) if l.last_call_at else None,
+            "ia_pausada"  : getattr(l, 'ia_pausada', False) or False,
             "created_at"  : str(l.created_at)
         }
         for l in leads
@@ -102,6 +103,7 @@ def deletar_lead(lead_id: str, db: Session = Depends(get_db)):
     db.query(WppMensagem).filter(WppMensagem.lead_id == lead_id).delete()
     db.query(CallSession).filter(CallSession.lead_id == lead_id).delete()
     db.query(Meeting).filter(Meeting.lead_id == lead_id).delete()
+    db.query(Callback).filter(Callback.lead_id == lead_id).delete()
 
     db.delete(lead)
     db.commit()
@@ -225,3 +227,17 @@ async def importar_csv(file: UploadFile = File(...), db: Session = Depends(get_d
         "duplicados": duplicados,
         "erros": erros,
     }
+
+
+# ── PAUSAR / ATIVAR IA ───────────────────────────────────────────────────────
+
+@router.post("/{lead_id}/pausar-ia")
+def toggle_pausar_ia(lead_id: str, db: Session = Depends(get_db)):
+    lead = db.get(Lead, lead_id)
+    if not lead:
+        return {"erro": "Lead não encontrado"}
+    lead.ia_pausada = not lead.ia_pausada
+    db.commit()
+    status = "pausada" if lead.ia_pausada else "ativada"
+    print(f"{'⏸️' if lead.ia_pausada else '▶️'} IA {status} para {lead.name} ({lead.phone})")
+    return {"mensagem": f"IA {status}", "ia_pausada": lead.ia_pausada}

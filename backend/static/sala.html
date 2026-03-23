@@ -108,6 +108,115 @@
             background: rgba(248, 113, 113, 0.1);
         }
 
+        /* Background controls */
+        .bg-controls {
+            position: relative;
+            display: inline-block;
+        }
+
+        .btn-bg {
+            padding: 8px 14px;
+            background: transparent;
+            color: var(--gold);
+            border: 1px solid var(--gold-border);
+            cursor: pointer;
+            font-family: "DM Sans", sans-serif;
+            font-size: 10px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            transition: all 0.2s;
+        }
+
+        .btn-bg:hover {
+            background: rgba(205, 179, 77, 0.1);
+        }
+
+        .btn-bg.active {
+            background: rgba(205, 179, 77, 0.2);
+            border-color: var(--gold);
+        }
+
+        .bg-dropdown {
+            display: none;
+            position: absolute;
+            bottom: 100%;
+            right: 0;
+            background: #111;
+            border: 1px solid var(--gold-border);
+            padding: 10px;
+            min-width: 220px;
+            z-index: 100;
+            margin-bottom: 8px;
+        }
+
+        .bg-dropdown.show {
+            display: block;
+        }
+
+        .bg-option {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 10px;
+            cursor: pointer;
+            border: 1px solid transparent;
+            transition: all 0.2s;
+            margin-bottom: 4px;
+        }
+
+        .bg-option:hover,
+        .bg-option.selected {
+            border-color: var(--gold-border);
+            background: rgba(205, 179, 77, 0.05);
+        }
+
+        .bg-option .thumb {
+            width: 40px;
+            height: 30px;
+            border: 1px solid #333;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            background: #0a0a0a;
+            overflow: hidden;
+        }
+
+        .bg-option .thumb img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .bg-option .label {
+            font-size: 11px;
+            color: var(--gray);
+            letter-spacing: 1px;
+        }
+
+        .bg-option.selected .label {
+            color: var(--gold);
+        }
+
+        .bg-upload-btn {
+            display: block;
+            width: 100%;
+            margin-top: 8px;
+            padding: 6px;
+            background: transparent;
+            color: var(--gray);
+            border: 1px dashed #333;
+            cursor: pointer;
+            font-size: 10px;
+            text-align: center;
+            font-family: "DM Sans", sans-serif;
+        }
+
+        .bg-upload-btn:hover {
+            border-color: var(--gold);
+            color: var(--gold);
+        }
+
         #daily-container {
             position: fixed;
             top: 53px;
@@ -213,6 +322,32 @@
         <div class="info">Reunião com <strong>{{LEAD_NAME}}</strong> &nbsp;·&nbsp; {{SCHEDULED_AT}}</div>
         <div class="topbar-right">
             <div class="live"><span class="pulse"></span>Ao vivo</div>
+            <div class="bg-controls">
+                <button class="btn-bg" id="bg-toggle" onclick="toggleBgMenu()">🎨 Fundo</button>
+                <div class="bg-dropdown" id="bg-dropdown">
+                    <div class="bg-option selected" onclick="setBg('none')" id="bg-none">
+                        <div class="thumb">🚫</div>
+                        <div class="label">Sem efeito</div>
+                    </div>
+                    <div class="bg-option" onclick="setBg('blur-light')" id="bg-blur-light">
+                        <div class="thumb">🌫️</div>
+                        <div class="label">Desfoque leve</div>
+                    </div>
+                    <div class="bg-option" onclick="setBg('blur-strong')" id="bg-blur-strong">
+                        <div class="thumb">🌁</div>
+                        <div class="label">Desfoque forte</div>
+                    </div>
+                    <div class="bg-option" onclick="setBg('flcbank')" id="bg-flcbank">
+                        <div class="thumb" style="background:#0a0a0a;color:#cdb34d;font-size:9px;font-weight:600">FLC
+                        </div>
+                        <div class="label">FLC Bank</div>
+                    </div>
+                    <label class="bg-upload-btn">
+                        📁 Enviar imagem personalizada
+                        <input type="file" accept="image/*" onchange="uploadBg(this)" style="display:none">
+                    </label>
+                </div>
+            </div>
             <button class="btn-encerrar" onclick="confirmarEncerrar()">&#9209; Encerrar para todos</button>
         </div>
     </div>
@@ -255,7 +390,29 @@
             );
             frame
                 .on("loaded", function () { document.getElementById("loading").style.display = "none"; })
-                .on("joined-meeting", function () { document.getElementById("loading").style.display = "none"; })
+                .on("joined-meeting", function () {
+                    document.getElementById("loading").style.display = "none";
+                    // Auto-start gravação cloud
+                    setTimeout(function () {
+                        try {
+                            frame.startRecording({ layout: { preset: "active-participant" } });
+                            console.log("🔴 Gravação iniciada automaticamente");
+                        } catch (e) {
+                            console.log("⚠️ Erro ao iniciar gravação:", e);
+                        }
+                    }, 3000); // Espera 3s pra sala estabilizar
+                })
+                .on("recording-started", function () {
+                    var recDot = document.createElement("div");
+                    recDot.id = "rec-indicator";
+                    recDot.innerHTML = "🔴 GRAVANDO";
+                    recDot.style.cssText = "position:fixed;top:10px;right:10px;background:rgba(0,0,0,0.7);color:#ff4444;padding:6px 14px;border-radius:20px;font-size:11px;letter-spacing:1px;z-index:999;font-family:DM Sans,sans-serif;";
+                    document.body.appendChild(recDot);
+                })
+                .on("recording-stopped", function () {
+                    var ind = document.getElementById("rec-indicator");
+                    if (ind) ind.remove();
+                })
                 .on("left-meeting", function () { document.body.innerHTML = LEFT_HTML; });
 
             var joinOpts = { url: roomUrl };
@@ -269,9 +426,106 @@
 
         function encerrarParaTodos() {
             document.getElementById("modal-enc").style.display = "none";
+            // Para gravação antes de encerrar
+            if (frame) { try { frame.stopRecording(); } catch (e) { } }
             fetch("/reuniao/api/meetings/by-room/" + roomName + "/encerrar", { method: "POST" }).catch(function () { });
-            if (frame) { try { frame.leave(); } catch (e) { } }
-            document.body.innerHTML = ENCERRAR_HTML;
+            // Espera 2s pra gravação salvar antes de sair
+            setTimeout(function () {
+                if (frame) { try { frame.leave(); } catch (e) { } }
+                document.body.innerHTML = ENCERRAR_HTML;
+            }, 2000);
+        }
+
+        // ── BACKGROUND CONTROLS ──────────────────────────────────────
+        var currentBg = "none";
+        var customBgData = null;
+
+        // FLC Bank background - gold gradient with logo
+        var FLC_BG = "data:image/svg+xml;base64," + btoa('<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080"><defs><linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" style="stop-color:#0a0a0a"/><stop offset="50%" style="stop-color:#111111"/><stop offset="100%" style="stop-color:#0a0a0a"/></linearGradient></defs><rect width="1920" height="1080" fill="url(#g)"/><text x="960" y="500" text-anchor="middle" font-family="Georgia,serif" font-size="72" fill="#cdb34d" opacity="0.3">FLC Bank</text><text x="960" y="580" text-anchor="middle" font-family="Arial,sans-serif" font-size="24" fill="#cdb34d" opacity="0.2">Hub de Crédito</text><line x1="760" y1="520" x2="1160" y2="520" stroke="#cdb34d" stroke-width="1" opacity="0.15"/></svg>');
+
+        function toggleBgMenu() {
+            var dd = document.getElementById("bg-dropdown");
+            dd.classList.toggle("show");
+        }
+
+        // Close dropdown when clicking outside
+        document.addEventListener("click", function (e) {
+            if (!e.target.closest(".bg-controls")) {
+                document.getElementById("bg-dropdown").classList.remove("show");
+            }
+        });
+
+        function setBg(type) {
+            if (!frame) return;
+            currentBg = type;
+
+            // Update selected state
+            document.querySelectorAll(".bg-option").forEach(function (el) { el.classList.remove("selected"); });
+            var el = document.getElementById("bg-" + type);
+            if (el) el.classList.add("selected");
+
+            // Update button state
+            var btn = document.getElementById("bg-toggle");
+            btn.classList.toggle("active", type !== "none");
+
+            try {
+                if (type === "none") {
+                    frame.updateInputSettings({
+                        video: { processor: { type: "none" } }
+                    });
+                } else if (type === "blur-light") {
+                    frame.updateInputSettings({
+                        video: { processor: { type: "background-blur", config: { strength: 0.4 } } }
+                    });
+                } else if (type === "blur-strong") {
+                    frame.updateInputSettings({
+                        video: { processor: { type: "background-blur", config: { strength: 0.9 } } }
+                    });
+                } else if (type === "flcbank") {
+                    frame.updateInputSettings({
+                        video: { processor: { type: "background-image", config: { source: FLC_BG } } }
+                    });
+                } else if (type === "custom" && customBgData) {
+                    frame.updateInputSettings({
+                        video: { processor: { type: "background-image", config: { source: customBgData } } }
+                    });
+                }
+                console.log("🎨 Fundo alterado: " + type);
+            } catch (e) {
+                console.log("⚠️ Erro ao alterar fundo:", e);
+                alert("Seu navegador pode não suportar fundo virtual. Tente usar Chrome ou Edge.");
+            }
+        }
+
+        function uploadBg(input) {
+            if (!input.files || !input.files[0]) return;
+            var file = input.files[0];
+            if (file.size > 5 * 1024 * 1024) {
+                alert("Imagem muito grande. Máximo 5MB.");
+                return;
+            }
+            var reader = new FileReader();
+            reader.onload = function (e) {
+                customBgData = e.target.result;
+
+                // Add custom option to dropdown if not exists
+                var existing = document.getElementById("bg-custom");
+                if (!existing) {
+                    var opt = document.createElement("div");
+                    opt.className = "bg-option";
+                    opt.id = "bg-custom";
+                    opt.onclick = function () { setBg("custom"); };
+                    opt.innerHTML = '<div class="thumb"><img src="' + customBgData + '"></div><div class="label">Personalizado</div>';
+                    var uploadBtn = document.querySelector(".bg-upload-btn");
+                    uploadBtn.parentNode.insertBefore(opt, uploadBtn);
+                } else {
+                    existing.querySelector("img").src = customBgData;
+                }
+
+                setBg("custom");
+                document.getElementById("bg-dropdown").classList.remove("show");
+            };
+            reader.readAsDataURL(file);
         }
     </script>
 </body>

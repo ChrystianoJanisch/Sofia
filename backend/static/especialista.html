@@ -1,0 +1,774 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FLC Bank — Painel Especialista</title>
+  <link
+    href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=Cormorant+Garamond:wght@700&display=swap"
+    rel="stylesheet">
+  <style>
+    :root {
+      --gold: #cdb34d;
+      --gold-light: #ddc96a;
+      --gold-dim: rgba(205, 179, 77, 0.1);
+      --gold-border: rgba(205, 179, 77, 0.18);
+      --black: #000;
+      --black-2: #0a0a0a;
+      --black-3: #111;
+      --white: #fff;
+      --gray: #909090;
+      --gray-dim: #444;
+      --green: #4ade80;
+      --red: #f87171;
+      --blue: #60a5fa
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box
+    }
+
+    body {
+      font-family: 'DM Sans', sans-serif;
+      background: var(--black);
+      color: var(--white);
+      min-height: 100vh
+    }
+
+    .top-line {
+      height: 1px;
+      background: linear-gradient(90deg, transparent, var(--gold), transparent);
+      position: sticky;
+      top: 0;
+      z-index: 100
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 16px;
+      background: var(--black-2);
+      border-bottom: 1px solid var(--gold-border);
+      position: sticky;
+      top: 1px;
+      z-index: 99
+    }
+
+    .logo {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--gold)
+    }
+
+    .user-info {
+      font-size: 11px;
+      color: var(--gray);
+      display: flex;
+      align-items: center;
+      gap: 8px
+    }
+
+    .user-info .nome {
+      color: var(--gold);
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      font-size: 9px
+    }
+
+    .layout {
+      display: flex;
+      height: calc(100vh - 43px)
+    }
+
+    .sidebar {
+      width: 320px;
+      border-right: 1px solid var(--gold-border);
+      display: flex;
+      flex-direction: column;
+      background: var(--black-2)
+    }
+
+    .sidebar-header {
+      padding: 12px;
+      border-bottom: 1px solid var(--gold-border)
+    }
+
+    .sidebar-header h3 {
+      font-size: 8px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--gold);
+      font-weight: 500;
+      margin-bottom: 8px
+    }
+
+    .sidebar-count {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 24px;
+      color: var(--white);
+      font-weight: 700
+    }
+
+    .sidebar-list {
+      flex: 1;
+      overflow-y: auto
+    }
+
+    .lead-card {
+      padding: 12px;
+      border-bottom: 1px solid rgba(205, 179, 77, .08);
+      cursor: pointer;
+      transition: background .15s
+    }
+
+    .lead-card:hover {
+      background: var(--gold-dim)
+    }
+
+    .lead-card.active {
+      background: var(--gold-dim);
+      border-left: 2px solid var(--gold)
+    }
+
+    .lead-card .name {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--white)
+    }
+
+    .lead-card .company {
+      font-size: 10px;
+      color: var(--gray);
+      margin-top: 2px
+    }
+
+    .lead-card .meta {
+      display: flex;
+      gap: 8px;
+      margin-top: 6px;
+      font-size: 10px;
+      color: var(--gray)
+    }
+
+    .lead-card .badge {
+      font-size: 8px;
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-weight: 500;
+      letter-spacing: .5px
+    }
+
+    .badge-hot {
+      background: rgba(248, 113, 113, .15);
+      color: var(--red)
+    }
+
+    .badge-warm {
+      background: rgba(205, 179, 77, .15);
+      color: var(--gold)
+    }
+
+    .badge-novo {
+      background: rgba(144, 144, 144, .15);
+      color: var(--gray)
+    }
+
+    .lead-card .ultima-msg {
+      font-size: 10px;
+      color: var(--gray);
+      margin-top: 4px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis
+    }
+
+    .main {
+      flex: 1;
+      display: flex;
+      flex-direction: column
+    }
+
+    .main-empty {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--gray);
+      font-size: 13px
+    }
+
+    .chat-header {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--gold-border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: var(--black-2)
+    }
+
+    .chat-header .info {
+      display: flex;
+      flex-direction: column;
+      gap: 2px
+    }
+
+    .chat-header .name {
+      font-size: 14px;
+      font-weight: 500
+    }
+
+    .chat-header .detail {
+      font-size: 10px;
+      color: var(--gray)
+    }
+
+    .btn {
+      padding: 8px 14px;
+      font-size: 9px;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      cursor: pointer;
+      border: none;
+      font-family: 'DM Sans', sans-serif;
+      font-weight: 500;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      transition: all .2s;
+      white-space: nowrap;
+      border-radius: 4px
+    }
+
+    .btn-gold {
+      background: var(--gold);
+      color: var(--black)
+    }
+
+    .btn-gold:hover {
+      background: var(--gold-light)
+    }
+
+    .btn-danger {
+      background: transparent;
+      color: var(--red);
+      border: 1px solid rgba(248, 113, 113, .25)
+    }
+
+    .btn-danger:hover {
+      background: rgba(248, 113, 113, .08)
+    }
+
+    .btn-outline {
+      background: transparent;
+      color: var(--gray);
+      border: 1px solid var(--gold-border)
+    }
+
+    .btn-outline:hover {
+      color: var(--gold);
+      border-color: var(--gold)
+    }
+
+    .chat-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px
+    }
+
+    .msg {
+      max-width: 75%;
+      padding: 10px 14px;
+      border-radius: 12px;
+      font-size: 13px;
+      line-height: 1.5;
+      word-wrap: break-word
+    }
+
+    .msg-user {
+      align-self: flex-start;
+      background: var(--black-3);
+      border: 1px solid var(--gold-border);
+      color: var(--white)
+    }
+
+    .msg-assistant {
+      align-self: flex-end;
+      background: var(--gold-dim);
+      border: 1px solid var(--gold-border);
+      color: var(--white)
+    }
+
+    .msg-system {
+      align-self: center;
+      background: transparent;
+      border: 1px dashed var(--gold-border);
+      color: var(--gray);
+      font-size: 11px;
+      padding: 6px 12px
+    }
+
+    .msg .time {
+      font-size: 9px;
+      color: var(--gray);
+      margin-top: 4px
+    }
+
+    .msg .sender {
+      font-size: 9px;
+      color: var(--gold);
+      font-weight: 500;
+      margin-bottom: 2px
+    }
+
+    .chat-input {
+      padding: 12px;
+      border-top: 1px solid var(--gold-border);
+      display: flex;
+      gap: 8px;
+      background: var(--black-2)
+    }
+
+    .chat-input textarea {
+      flex: 1;
+      background: var(--black-3);
+      border: 1px solid var(--gold-border);
+      color: var(--white);
+      font-family: 'DM Sans', sans-serif;
+      font-size: 13px;
+      padding: 10px;
+      border-radius: 6px;
+      resize: none;
+      outline: none;
+      min-height: 44px;
+      max-height: 120px
+    }
+
+    .chat-input textarea:focus {
+      border-color: var(--gold)
+    }
+
+    .chat-input textarea::placeholder {
+      color: var(--gray-dim)
+    }
+
+    .contexto-panel {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--gold-border);
+      background: var(--black-3);
+      max-height: 140px;
+      overflow-y: auto
+    }
+
+    .contexto-panel h4 {
+      font-size: 8px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--gold);
+      font-weight: 500;
+      margin-bottom: 8px
+    }
+
+    .contexto-panel p {
+      font-size: 11px;
+      color: var(--gray);
+      line-height: 1.6;
+      white-space: pre-line
+    }
+
+    .toast {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      padding: 10px 20px;
+      border-radius: 6px;
+      font-size: 12px;
+      z-index: 1000;
+      animation: fadeIn .3s
+    }
+
+    .toast-success {
+      background: rgba(74, 222, 128, .15);
+      color: var(--green);
+      border: 1px solid rgba(74, 222, 128, .3)
+    }
+
+    .toast-error {
+      background: rgba(248, 113, 113, .15);
+      color: var(--red);
+      border: 1px solid rgba(248, 113, 113, .3)
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+        transform: translateY(10px)
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0)
+      }
+    }
+
+    .notif-dot {
+      width: 8px;
+      height: 8px;
+      background: var(--red);
+      border-radius: 50%;
+      display: inline-block;
+      margin-left: 4px;
+      animation: pulse 1.5s infinite
+    }
+
+    @keyframes pulse {
+
+      0%,
+      100% {
+        opacity: 1
+      }
+
+      50% {
+        opacity: .3
+      }
+    }
+
+    @media(max-width:768px) {
+      .sidebar {
+        width: 100%;
+        max-width: 100%
+      }
+
+      .layout {
+        flex-direction: column
+      }
+
+      .chat-body {
+        max-height: 50vh
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="top-line"></div>
+  <div class="topbar">
+    <div class="logo">FLC Bank</div>
+    <div class="user-info">
+      <span class="nome" id="esp-nome">ESPECIALISTA</span>
+      <span>|</span>
+      <button class="btn btn-outline" onclick="logout()" style="padding:4px 10px;font-size:8px">SAIR</button>
+    </div>
+  </div>
+  <div class="layout">
+    <div class="sidebar">
+      <div class="sidebar-header">
+        <h3>Atendimentos ativos</h3>
+        <div class="sidebar-count" id="count">0</div>
+      </div>
+      <div class="sidebar-list" id="lead-list"></div>
+    </div>
+    <div class="main" id="main-area">
+      <div class="main-empty" id="empty-state">Selecione um atendimento na lateral</div>
+    </div>
+  </div>
+
+  <!-- Modal Transferir -->
+  <div class="modal-overlay" id="modal-transferir-esp"
+    style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.7);z-index:200;align-items:center;justify-content:center">
+    <div
+      style="background:var(--black-2);border:1px solid var(--gold-border);padding:24px;max-width:400px;width:90%;border-radius:6px">
+      <h3 style="font-size:14px;color:var(--gold);margin-bottom:16px">Transferir atendimento</h3>
+      <div id="transf-lead-info" style="font-size:12px;color:var(--gray);margin-bottom:12px"></div>
+      <div style="margin-bottom:12px">
+        <label
+          style="font-size:8px;letter-spacing:2px;text-transform:uppercase;color:var(--gold);display:block;margin-bottom:6px">Transferir
+          para</label>
+        <select id="transf-esp-select"
+          style="width:100%;background:var(--black-3);border:1px solid var(--gold-border);color:var(--white);font-family:'DM Sans',sans-serif;font-size:13px;padding:10px;outline:none"></select>
+      </div>
+      <div style="margin-bottom:16px">
+        <label
+          style="font-size:8px;letter-spacing:2px;text-transform:uppercase;color:var(--gold);display:block;margin-bottom:6px">Motivo
+          (opcional)</label>
+        <input id="transf-motivo" placeholder="Ex: Cliente precisa de suporte financeiro"
+          style="width:100%;background:var(--black-3);border:1px solid var(--gold-border);color:var(--white);font-family:'DM Sans',sans-serif;font-size:13px;padding:10px;outline:none">
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button class="btn btn-outline" onclick="fecharTransferirEsp()">Cancelar</button>
+        <button class="btn btn-gold" onclick="executarTransferirEsp()">Transferir</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    var BASE = window.location.origin;
+    var espId = localStorage.getItem('esp_id') || '';
+    var espNome = localStorage.getItem('esp_nome') || '';
+    var espTitulo = localStorage.getItem('esp_titulo') || '';
+    var atendimentos = [];
+    var leadAtivo = null;
+    var pollInterval = null;
+
+    function toast(msg, tipo) { var t = document.createElement('div'); t.className = 'toast toast-' + (tipo || 'success'); t.textContent = msg; document.body.appendChild(t); setTimeout(function () { t.remove() }, 3000) }
+
+    function api(path, opts) {
+      opts = opts || {};
+      opts.headers = opts.headers || {};
+      opts.headers['Content-Type'] = 'application/json';
+      var token = localStorage.getItem('sofia_token');
+      if (token) opts.headers['Authorization'] = 'Bearer ' + token;
+      return fetch(BASE + path, opts);
+    }
+
+    function login() {
+      window.location.href = '/login?redirect=/painel-especialista';
+    }
+
+    function carregarEspecialistas(email) {
+      api('/api/especialistas/').then(function (r) { return r.json() }).then(function (esps) {
+        var meu = esps.find(function (e) { return e.email === email });
+        if (meu) {
+          espId = meu.id; espNome = meu.nome; espTitulo = meu.titulo;
+          localStorage.setItem('esp_id', espId);
+          localStorage.setItem('esp_nome', espNome);
+          localStorage.setItem('esp_titulo', espTitulo);
+          document.getElementById('esp-nome').textContent = espNome + ' • ' + espTitulo;
+          carregarAtendimentos();
+          if (pollInterval) clearInterval(pollInterval);
+          pollInterval = setInterval(carregarAtendimentos, 5000);
+        } else {
+          alert('Você não está cadastrado como especialista. Peça ao admin pra te cadastrar.');
+        }
+      });
+    }
+
+    function logout() {
+      localStorage.removeItem('esp_id');
+      localStorage.removeItem('esp_nome');
+      localStorage.removeItem('esp_titulo');
+      localStorage.removeItem('sofia_token');
+      localStorage.removeItem('sofia_user');
+      window.location.href = '/login';
+    }
+
+    function carregarAtendimentos() {
+      if (!espId) return;
+      api('/api/especialistas/meus-atendimentos/' + espId).then(function (r) { return r.json() }).then(function (dados) {
+        var antes = atendimentos.length;
+        atendimentos = dados;
+        document.getElementById('count').textContent = dados.length;
+        renderLista();
+        if (leadAtivo) {
+          var atual = dados.find(function (d) { return d.id === leadAtivo });
+          if (atual) atualizarMensagens(atual);
+        }
+        if (dados.length > antes && antes > 0) {
+          toast('Novo atendimento!', 'success');
+          if ('Notification' in window && Notification.permission === 'granted') {
+            new Notification('FLC Bank', { body: 'Novo atendimento recebido!' });
+          }
+        }
+      });
+    }
+
+    function atualizarMensagens(lead) {
+      var body = document.getElementById('chat-body');
+      if (!body) { renderChat(lead); return }
+      var msgAntes = body.children.length;
+      var msgHtml = lead.mensagens.map(function (m) {
+        var cls = m.role === 'user' ? 'msg-user' : m.role === 'system' ? 'msg-system' : 'msg-assistant';
+        var sender = '';
+        if (m.role === 'user') sender = '<div class="sender">' + esc(lead.name || 'Cliente') + '</div>';
+        else if (m.role === 'assistant') {
+          if (m.content && m.content.indexOf('*') === 0 && m.content.indexOf(':') > 0) { sender = '' }
+          else { sender = '<div class="sender">Julia IA</div>' }
+        }
+        var time = m.created_at ? m.created_at.split(' ')[1] || '' : '';
+        if (time && time.length > 5) time = time.substring(0, 5);
+        return '<div class="msg ' + cls + '">' + sender + '<div>' + esc(m.content) + '</div>' + (time ? '<div class="time">' + time + '</div>' : '') + '</div>';
+      }).join('');
+      body.innerHTML = msgHtml;
+      if (lead.mensagens.length > msgAntes) { body.scrollTop = body.scrollHeight }
+    }
+
+    function renderLista() {
+      var el = document.getElementById('lead-list');
+      if (!atendimentos.length) { el.innerHTML = '<div style="padding:20px;text-align:center;color:var(--gray);font-size:12px">Nenhum atendimento no momento</div>'; return }
+      el.innerHTML = atendimentos.map(function (a) {
+        var ativo = a.id === leadAtivo ? ' active' : '';
+        var ultima = a.mensagens.length ? a.mensagens[a.mensagens.length - 1] : {};
+        var umsg = ultima.content ? ultima.content.substring(0, 60) + '...' : '';
+        var tempBadge = a.temperature === 'hot' ? 'badge-hot' : a.temperature === 'warm' ? 'badge-warm' : 'badge-novo';
+        return '<div class="lead-card' + ativo + '" onclick="selecionarLead(\'' + a.id + '\')">'
+          + '<div class="name">' + esc(a.name || '—') + '</div>'
+          + (a.company ? '<div class="company">' + esc(a.company) + '</div>' : '')
+          + '<div class="meta">'
+          + '<span>' + esc(a.phone) + '</span>'
+          + (a.temperature ? '<span class="badge ' + tempBadge + '">' + a.temperature.toUpperCase() + '</span>' : '')
+          + (a.product ? '<span>' + esc(a.product) + '</span>' : '')
+          + '</div>'
+          + (umsg ? '<div class="ultima-msg">' + esc(umsg) + '</div>' : '')
+          + '</div>';
+      }).join('');
+    }
+
+    function selecionarLead(id) {
+      leadAtivo = id;
+      renderLista();
+      var lead = atendimentos.find(function (a) { return a.id === id });
+      if (lead) renderChat(lead);
+    }
+
+    function renderChat(lead) {
+      var main = document.getElementById('main-area');
+      var emptyEl = document.getElementById('empty-state');
+      if (emptyEl) emptyEl.style.display = 'none';
+
+      main.innerHTML = ''
+        + '<div class="chat-header">'
+        + '<div class="info">'
+        + '<div class="name">' + esc(lead.name || '—') + (lead.company ? ' — ' + esc(lead.company) : '') + '</div>'
+        + '<div class="detail">' + esc(lead.phone) + ' | ' + esc(lead.product || 'Produto não definido') + ' | ' + esc(lead.temperature || '—').toUpperCase() + '</div>'
+        + '</div>'
+        + '<div style="display:flex;gap:8px">'
+        + '<button class="btn btn-outline" onclick="toggleContexto()">📋 Contexto</button>'
+        + '<button class="btn btn-outline" onclick="abrirTransferirEsp(\'' + lead.id + '\',\'' + esc(lead.name || '') + '\')">🔄 Transferir</button>'
+        + '<button class="btn btn-danger" onclick="encerrarAtendimento(\'' + lead.id + '\')">Encerrar</button>'
+        + '</div>'
+        + '</div>'
+        + '<div class="contexto-panel" id="ctx-panel" style="display:none">'
+        + '<h4>Contexto da conversa</h4>'
+        + '<p>' + esc(lead.contexto || lead.resumo || 'Sem contexto disponível') + '</p>'
+        + '</div>'
+        + '<div class="chat-body" id="chat-body"></div>'
+        + '<div class="chat-input">'
+        + '<textarea id="msg-input" placeholder="Digite sua mensagem..." onkeydown="if(event.key===\'Enter\'&&!event.shiftKey){event.preventDefault();enviarMsg(\'' + lead.id + '\');}"></textarea>'
+        + '<button class="btn btn-gold" onclick="enviarMsg(\'' + lead.id + '\')">Enviar</button>'
+        + '</div>';
+
+      var body = document.getElementById('chat-body');
+      body.innerHTML = lead.mensagens.map(function (m) {
+        var cls = m.role === 'user' ? 'msg-user' : m.role === 'system' ? 'msg-system' : 'msg-assistant';
+        var sender = '';
+        if (m.role === 'user') sender = '<div class="sender">' + esc(lead.name || 'Cliente') + '</div>';
+        else if (m.role === 'assistant') {
+          if (m.content && m.content.indexOf('*') === 0 && m.content.indexOf(':') > 0) {
+            sender = '';
+          } else {
+            sender = '<div class="sender">Julia IA</div>';
+          }
+        }
+        var time = m.created_at ? m.created_at.split(' ')[1] || '' : '';
+        if (time && time.length > 5) time = time.substring(0, 5);
+        return '<div class="msg ' + cls + '">' + sender + '<div>' + esc(m.content) + '</div>' + (time ? '<div class="time">' + time + '</div>' : '') + '</div>';
+      }).join('');
+
+      body.scrollTop = body.scrollHeight;
+    }
+
+    function toggleContexto() {
+      var p = document.getElementById('ctx-panel');
+      p.style.display = p.style.display === 'none' ? 'block' : 'none';
+    }
+
+    function enviarMsg(leadId) {
+      var input = document.getElementById('msg-input');
+      var texto = input.value.trim();
+      if (!texto) return;
+      input.value = '';
+
+      api('/api/especialistas/enviar-mensagem', {
+        method: 'POST',
+        body: JSON.stringify({ lead_id: leadId, texto: texto })
+      }).then(function (r) { return r.json() }).then(function (d) {
+        if (d.erro) { toast(d.erro, 'error'); return }
+        carregarAtendimentos();
+      }).catch(function (e) { toast('Erro: ' + e.message, 'error') });
+    }
+
+    // ── TRANSFERIR PARA OUTRO ESPECIALISTA ────────────────────────────────────
+    var transfLeadId = '';
+    function abrirTransferirEsp(leadId, leadName) {
+      transfLeadId = leadId;
+      document.getElementById('transf-lead-info').textContent = 'Cliente: ' + leadName;
+      document.getElementById('transf-motivo').value = '';
+      // Busca lista de especialistas
+      api('/api/especialistas/').then(function (r) { return r.json() }).then(function (esps) {
+        var sel = document.getElementById('transf-esp-select');
+        sel.innerHTML = esps.filter(function (e) { return e.ativo && e.id !== espId }).map(function (e) {
+          return '<option value="' + e.id + '">' + esc(e.nome) + ' — ' + esc(e.titulo || e.area) + '</option>';
+        }).join('');
+        if (!sel.innerHTML) sel.innerHTML = '<option>Nenhum outro especialista disponível</option>';
+        document.getElementById('modal-transferir-esp').style.display = 'flex';
+      });
+    }
+    function fecharTransferirEsp() { document.getElementById('modal-transferir-esp').style.display = 'none' }
+    function executarTransferirEsp() {
+      var novoEspId = document.getElementById('transf-esp-select').value;
+      var motivo = document.getElementById('transf-motivo').value;
+      if (!novoEspId || !transfLeadId) return;
+      api('/api/especialistas/transferir-entre-especialistas', {
+        method: 'POST',
+        body: JSON.stringify({ lead_id: transfLeadId, novo_especialista_id: novoEspId, motivo: motivo || 'Transferência entre especialistas' })
+      }).then(function (r) { return r.json() }).then(function (d) {
+        if (d.erro) { toast(d.erro, 'error'); return }
+        toast(d.mensagem || 'Transferido!', 'success');
+        fecharTransferirEsp();
+        leadAtivo = null;
+        document.getElementById('main-area').innerHTML = '<div class="main-empty">Atendimento transferido</div>';
+        carregarAtendimentos();
+      }).catch(function (e) { toast('Erro: ' + e.message, 'error') });
+    }
+
+    function encerrarAtendimento(leadId) {
+      var msg = prompt('Mensagem de despedida (opcional):', 'Obrigado pelo contato! Se precisar de algo mais, é só chamar.');
+      if (msg === null) return;
+
+      api('/api/especialistas/encerrar', {
+        method: 'POST',
+        body: JSON.stringify({ lead_id: leadId, mensagem_final: msg || '' })
+      }).then(function (r) { return r.json() }).then(function (d) {
+        toast(d.mensagem || 'Encerrado', 'success');
+        leadAtivo = null;
+        document.getElementById('main-area').innerHTML = '<div class="main-empty">Selecione um atendimento na lateral</div>';
+        carregarAtendimentos();
+      }).catch(function (e) { toast('Erro: ' + e.message, 'error') });
+    }
+
+    function esc(s) { if (!s) return ''; var d = document.createElement('div'); d.textContent = s; return d.innerHTML }
+
+    // ── INIT ───────────────────────────────────────────────────────────────────
+    if ('Notification' in window && Notification.permission === 'default') { Notification.requestPermission() }
+
+    // SEMPRE valida o especialista a partir do usuário logado (fix: redirecionamento errado)
+    var token = localStorage.getItem('sofia_token');
+    var user = localStorage.getItem('sofia_user');
+    if (token && user) {
+      try {
+        var u = JSON.parse(user);
+        // Valida token primeiro
+        api('/api/auth/me').then(function (r) {
+          if (!r.ok) { login(); return }
+          return r.json();
+        }).then(function (me) {
+          if (!me) { login(); return }
+          // Sempre busca especialista do usuário ATUAL
+          carregarEspecialistas(me.email);
+        }).catch(function () { login() });
+      } catch (e) { login() }
+    } else {
+      login();
+    }
+  </script>
+</body>
+
+</html>

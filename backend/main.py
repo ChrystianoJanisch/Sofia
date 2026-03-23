@@ -11,17 +11,20 @@ load_dotenv()
 
 from db.database import init_db
 from scheduler import iniciar_scheduler
+from api.callback_scheduler import executar_callbacks, executar_followups
 from api.routes_leads import router as leads_router
 from api.routes_calls import router as calls_router
 from api.routes_crm import router as crm_router
 from api.routes_whatsapp import router as whatsapp_router
 from api.routes_meetings import router as meetings_router
 from api.routes_auth import router as auth_router          # ← AUTH
+from api.routes_especialistas import router as esp_router   # ← ESPECIALISTAS
+from api.routes_daily_webhook import router as daily_webhook_router
 
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 os.makedirs(STATIC_DIR, exist_ok=True)
 
-app = FastAPI(title=os.getenv("APP_NAME", "Julia.ia"), version="6.1.0")
+app = FastAPI(title=os.getenv("APP_NAME", "Julia"), version="6.1.0")
 
 # Middleware
 app.add_middleware(
@@ -40,13 +43,21 @@ app.include_router(crm_router,      prefix="/api/crm",      tags=["CRM"])
 app.include_router(whatsapp_router, prefix="/api/whatsapp", tags=["WhatsApp"])
 app.include_router(meetings_router, prefix="/reuniao",      tags=["Reuniões"])
 app.include_router(auth_router,     prefix="/api/auth",     tags=["Auth"])  # ← AUTH
+app.include_router(esp_router,      prefix="/api/especialistas", tags=["Especialistas"])
+app.include_router(daily_webhook_router, prefix="/api/daily", tags=["Daily.co"])
 
 
 @app.on_event("startup")
 async def startup():
     init_db()
     iniciar_scheduler()
-    print("🚀 Julia.ia v6.1 — Auth + Agenda + WhatsApp — Pronta!")
+    import asyncio
+    asyncio.create_task(executar_callbacks())
+    asyncio.create_task(executar_followups())
+    # Configura webhook do Daily.co para receber gravações
+    from integrations.daily import configurar_webhook_gravacao
+    configurar_webhook_gravacao()
+    print("🚀 Julia v6.2 — Auth + Agenda + WhatsApp + Callbacks + Gravação — Pronta!")
 
 
 @app.get("/")
@@ -67,3 +78,8 @@ def login_page():
 @app.get("/dashboard")
 def dashboard():
     return FileResponse(os.path.join(STATIC_DIR, "dashboard.html"))
+
+
+@app.get("/painel-especialista")
+def painel_especialista():
+    return FileResponse(os.path.join(STATIC_DIR, "especialista.html"))

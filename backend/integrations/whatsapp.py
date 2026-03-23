@@ -37,7 +37,7 @@ def enviar_whatsapp(phone: str, nome: str, mensagem: str = None):
     if mensagem is None:
         mensagem = (
             f"Olá {nome or 'tudo bem'}! 👋\n\n"
-            f"Aqui é a Julia.ia da FLC Bank. Tentei te ligar agora mas não consegui falar com você.\n\n"
+            f"Aqui é a Julia da FLC Bank. Tentei te ligar agora mas não consegui falar com você.\n\n"
             f"Temos condições especiais de crédito com acesso a mais de 60 instituições financeiras. "
             f"Quando tiver um momento, me responda aqui e posso te apresentar as opções! 😊"
         )
@@ -48,7 +48,7 @@ def enviar_agendamento_whatsapp(phone: str, nome: str, mensagem: str = None):
     numero = _formatar_numero(phone)
     if mensagem is None:
         mensagem = (
-            f"Olá {nome or ''}! 😊 Aqui é a Julia.ia da FLC Bank.\n\n"
+            f"Olá {nome or ''}! 😊 Aqui é a Julia da FLC Bank.\n\n"
             f"Foi um prazer falar com você! Para agendarmos sua reunião com um especialista, "
             f"qual dia e horário fica melhor para você?\n\n"
             f"Pode me dizer o dia e a hora que prefere! 📅"

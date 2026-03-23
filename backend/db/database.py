@@ -70,6 +70,8 @@ class Lead(Base):
     last_call_at  = Column(DateTime, nullable=True)
     call_sid      = Column(String, default="")
     wpp_phone     = Column(String, default="")    # WhatsApp diferente do telefone da ligação
+    ia_pausada    = Column(Boolean, default=False) # True = IA não responde, humano atende
+    especialista_id = Column(String, default="")   # ID do especialista atendendo
     created_at    = Column(DateTime, default=datetime.utcnow)
     updated_at    = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -111,6 +113,10 @@ class Meeting(Base):
     status             = Column(String, default="agendado")
 
     recording_url      = Column(String, default="")
+    recording_id       = Column(String, default="")
+    transcricao_reuniao = Column(Text, default="")
+    resumo_reuniao     = Column(Text, default="")
+    transcript         = Column(Text, default="")
     token_host         = Column(String, default="")
     token_guest        = Column(String, default="")
 
@@ -133,6 +139,57 @@ class WppMensagem(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
 
     lead       = relationship("Lead", back_populates="wpp_mensagens")
+
+
+# ── CALLBACKS (ligar de volta) ────────────────────────────────────────────────
+
+class Callback(Base):
+    __tablename__ = "callbacks"
+
+    id            = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    lead_id       = Column(String, ForeignKey("leads.id"), nullable=False)
+    scheduled_at  = Column(DateTime, nullable=False)
+    status        = Column(String, default="pendente")   # pendente, executado, falhou, cancelado
+    motivo        = Column(String, default="")            # "cliente pediu pra ligar às 15h"
+    tentativas    = Column(Integer, default=0)
+    created_at    = Column(DateTime, default=datetime.utcnow)
+
+    lead          = relationship("Lead")
+
+
+# ── ESPECIALISTAS ─────────────────────────────────────────────────────────────
+
+class Especialista(Base):
+    __tablename__ = "especialistas"
+
+    id         = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    nome       = Column(String, nullable=False)
+    area       = Column(String, default="")          # credito_pj, credito_pf, reestruturacao, etc
+    titulo     = Column(String, default="")          # "Especialista em Crédito", "Suporte de TI"
+    whatsapp   = Column(String, default="")          # número pessoal pra notificação
+    email      = Column(String, default="")
+    senha_hash = Column(String, default="")
+    ativo      = Column(Boolean, default=True)
+    online     = Column(Boolean, default=False)
+    atendimentos_ativos = Column(Integer, default=0)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class Transferencia(Base):
+    __tablename__ = "transferencias"
+
+    id              = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    lead_id         = Column(String, ForeignKey("leads.id"), nullable=False)
+    especialista_id = Column(String, ForeignKey("especialistas.id"), nullable=False)
+    motivo          = Column(String, default="")
+    status          = Column(String, default="ativa")  # ativa, encerrada
+    contexto        = Column(Text, default="")          # resumo pra o especialista
+    iniciada_em     = Column(DateTime, default=datetime.utcnow)
+    encerrada_em    = Column(DateTime, nullable=True)
+
+    lead         = relationship("Lead")
+    especialista = relationship("Especialista")
 
 
 # ── USUÁRIOS (autenticação) ───────────────────────────────────────────────────
@@ -234,6 +291,43 @@ def _migrar_colunas():
         "ALTER TABLE meetings ADD COLUMN IF NOT EXISTS token_guest VARCHAR DEFAULT ''",
         "ALTER TABLE leads ADD COLUMN IF NOT EXISTS meetings_count INTEGER DEFAULT 0",
         "ALTER TABLE leads ADD COLUMN IF NOT EXISTS company VARCHAR DEFAULT ''",
+        "ALTER TABLE leads ADD COLUMN IF NOT EXISTS ia_pausada BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE leads ADD COLUMN IF NOT EXISTS especialista_id VARCHAR DEFAULT ''",
+        """CREATE TABLE IF NOT EXISTS especialistas (
+            id VARCHAR PRIMARY KEY,
+            nome VARCHAR NOT NULL,
+            area VARCHAR DEFAULT '',
+            titulo VARCHAR DEFAULT '',
+            whatsapp VARCHAR DEFAULT '',
+            email VARCHAR DEFAULT '',
+            senha_hash VARCHAR DEFAULT '',
+            ativo BOOLEAN DEFAULT TRUE,
+            online BOOLEAN DEFAULT FALSE,
+            atendimentos_ativos INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT NOW()
+        )""",
+        """CREATE TABLE IF NOT EXISTS transferencias (
+            id VARCHAR PRIMARY KEY,
+            lead_id VARCHAR REFERENCES leads(id),
+            especialista_id VARCHAR REFERENCES especialistas(id),
+            motivo VARCHAR DEFAULT '',
+            status VARCHAR DEFAULT 'ativa',
+            contexto TEXT DEFAULT '',
+            iniciada_em TIMESTAMP DEFAULT NOW(),
+            encerrada_em TIMESTAMP
+        )""",
+        """CREATE TABLE IF NOT EXISTS callbacks (
+            id VARCHAR PRIMARY KEY,
+            lead_id VARCHAR REFERENCES leads(id),
+            scheduled_at TIMESTAMP NOT NULL,
+            status VARCHAR DEFAULT 'pendente',
+            motivo VARCHAR DEFAULT '',
+            tentativas INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT NOW()
+        )""",
+        "ALTER TABLE meetings ADD COLUMN IF NOT EXISTS recording_id VARCHAR DEFAULT ''",
+        "ALTER TABLE meetings ADD COLUMN IF NOT EXISTS transcricao_reuniao TEXT DEFAULT ''",
+        "ALTER TABLE meetings ADD COLUMN IF NOT EXISTS resumo_reuniao TEXT DEFAULT ''",
         "ALTER TABLE leads ADD COLUMN IF NOT EXISTS conversa_estado TEXT DEFAULT '[]'",
         "ALTER TABLE leads ADD COLUMN IF NOT EXISTS wpp_etapa VARCHAR DEFAULT ''",
         "ALTER TABLE leads ADD COLUMN IF NOT EXISTS wpp_pendente VARCHAR DEFAULT ''",
@@ -242,6 +336,7 @@ def _migrar_colunas():
         "ALTER TABLE leads ADD COLUMN IF NOT EXISTS scheduled_at VARCHAR DEFAULT ''",
         "ALTER TABLE leads ADD COLUMN IF NOT EXISTS wpp_phone VARCHAR DEFAULT ''",
         "ALTER TABLE meetings ADD COLUMN IF NOT EXISTS lembrete_enviado BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE meetings ADD COLUMN IF NOT EXISTS transcript TEXT DEFAULT ''",
         "CREATE TABLE IF NOT EXISTS wpp_mensagens (id VARCHAR PRIMARY KEY, lead_id VARCHAR NOT NULL REFERENCES leads(id), role VARCHAR NOT NULL, content TEXT NOT NULL, created_at TIMESTAMP DEFAULT NOW())",
         "CREATE TABLE IF NOT EXISTS users (id VARCHAR PRIMARY KEY, email VARCHAR UNIQUE NOT NULL, password_hash VARCHAR NOT NULL, name VARCHAR DEFAULT '', role VARCHAR DEFAULT 'funcionario', active BOOLEAN DEFAULT TRUE, created_at TIMESTAMP DEFAULT NOW(), updated_at TIMESTAMP DEFAULT NOW())",
     ]

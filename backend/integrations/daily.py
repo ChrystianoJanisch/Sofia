@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 DAILY_API_KEY  = os.getenv("DAILY_API_KEY", "")
 DAILY_BASE_URL = "https://api.daily.co/v1"
-BASE_URL       = os.getenv("WEBHOOK_BASE_URL", "https://sofia-ai-production.up.railway.app")
+BASE_URL       = os.getenv("WEBHOOK_BASE_URL", "https://reuniao.flcbank.com.br")
 
 HEADERS = {
     "Authorization": f"Bearer {DAILY_API_KEY}",
@@ -20,15 +20,17 @@ def criar_sala(nome_lead: str, data_hora_str: str) -> dict:
             "name": slug,
             "properties": {
                 "exp": exp,
-                "enable_knocking": True,       # cliente fica na sala de espera até host liberar
+                "enable_knocking": True,
                 "enable_chat": True,
                 "enable_screenshare": True,
                 "start_video_off": False,
                 "start_audio_off": False,
                 "lang": "pt-BR",
                 "max_participants": 10,
-                "eject_at_room_exp": True,     # expulsa todos quando sala expira
-                "eject_after_elapsed": 7200,   # expulsa após 2h de reunião
+                "eject_at_room_exp": True,
+                "eject_after_elapsed": 7200,
+                # ── GRAVAÇÃO AUTOMÁTICA ──
+                "enable_recording": "cloud",
             }
         }
 
@@ -39,14 +41,13 @@ def criar_sala(nome_lead: str, data_hora_str: str) -> dict:
             room_url  = data.get("url", "")
             room_name = data.get("name", slug)
 
-            # Gera tokens para host e guest
             token_host  = _gerar_token(room_name, is_owner=True,  exp=exp)
             token_guest = _gerar_token(room_name, is_owner=False, exp=exp)
 
             link_cliente      = f"{BASE_URL}/reuniao/espera/{room_name}"
             link_especialista = f"{BASE_URL}/reuniao/sala/{room_name}"
 
-            print(f"✅ Sala Daily.co criada: {room_name}")
+            print(f"✅ Sala Daily.co criada: {room_name} (gravação habilitada)")
             return {
                 "sucesso":          True,
                 "room_name":        room_name,
@@ -66,7 +67,6 @@ def criar_sala(nome_lead: str, data_hora_str: str) -> dict:
 
 
 def _gerar_token(room_name: str, is_owner: bool, exp: int) -> str:
-    """Gera token JWT do Daily.co para host (owner) ou guest."""
     try:
         payload = {
             "properties": {
@@ -101,6 +101,94 @@ def obter_gravacoes(room_name: str) -> list:
     except Exception as e:
         print(f"❌ Erro ao buscar gravações: {e}")
         return []
+
+
+def obter_link_gravacao(recording_id: str) -> str:
+    try:
+        res = requests.get(
+            f"{DAILY_BASE_URL}/recordings/{recording_id}/access-link",
+            headers=HEADERS,
+            timeout=15
+        )
+        if res.status_code == 200:
+            return res.json().get("download_link", "")
+        return ""
+    except Exception as e:
+        print(f"❌ Erro ao obter link da gravação: {e}")
+        return ""
+
+
+def iniciar_gravacao(room_name: str) -> dict:
+    try:
+        res = requests.post(
+            f"{DAILY_BASE_URL}/rooms/{room_name}/recordings/start",
+            headers=HEADERS,
+            timeout=10
+        )
+        if res.status_code in (200, 201):
+            print(f"🔴 Gravação iniciada: {room_name}")
+            return {"sucesso": True}
+        print(f"⚠️ Erro ao iniciar gravação: {res.text}")
+        return {"sucesso": False}
+    except Exception as e:
+        print(f"❌ Erro ao iniciar gravação: {e}")
+        return {"sucesso": False}
+
+
+def parar_gravacao(room_name: str) -> dict:
+    try:
+        res = requests.post(
+            f"{DAILY_BASE_URL}/rooms/{room_name}/recordings/stop",
+            headers=HEADERS,
+            timeout=10
+        )
+        if res.status_code in (200, 201):
+            print(f"⏹️ Gravação parada: {room_name}")
+            return {"sucesso": True}
+        return {"sucesso": False}
+    except Exception as e:
+        print(f"❌ Erro ao parar gravação: {e}")
+        return {"sucesso": False}
+
+
+_webhook_ok = False
+
+def configurar_webhook_gravacao():
+    """Configura webhook no Daily.co pra receber eventos de gravação (só 1x)."""
+    global _webhook_ok
+    if _webhook_ok:
+        return
+
+    webhook_url = f"{BASE_URL}/api/daily/webhook"
+
+    try:
+        res = requests.get(f"{DAILY_BASE_URL}/webhooks", headers=HEADERS, timeout=10)
+        if res.status_code == 200:
+            body = res.json()
+            hooks = body if isinstance(body, list) else body.get("data", [])
+            for h in hooks:
+                hook_url = h.get("url", "") if isinstance(h, dict) else ""
+                if webhook_url in hook_url:
+                    _webhook_ok = True
+                    print(f"✅ Webhook Daily.co já configurado: {webhook_url}")
+                    return
+
+        payload = {
+            "url": webhook_url,
+            "event_types": [
+                "recording.ready-to-download",
+                "recording.started",
+                "recording.error",
+            ]
+        }
+        res = requests.post(f"{DAILY_BASE_URL}/webhooks", json=payload, headers=HEADERS, timeout=10)
+        if res.status_code in (200, 201):
+            _webhook_ok = True
+            print(f"✅ Webhook Daily.co configurado: {webhook_url}")
+        else:
+            print(f"⚠️ Erro ao configurar webhook Daily.co: {res.text}")
+    except Exception as e:
+        print(f"⚠️ Erro ao configurar webhook: {e}")
 
 
 def _gerar_slug(nome: str, data_hora_str: str) -> str:

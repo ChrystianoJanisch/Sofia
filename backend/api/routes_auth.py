@@ -166,16 +166,81 @@ def editar_usuario(user_id: str, dados: UpdateUserRequest, master: User = Depend
 
 @router.delete("/users/{user_id}")
 def deletar_usuario(user_id: str, master: User = Depends(require_master), db: Session = Depends(get_db)):
-    """Desativa um usuário — apenas master. Não deleta do banco."""
+    """Deleta um usuário permanentemente — apenas master."""
     user = db.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="Usuário não encontrado")
 
     if user.id == master.id:
-        raise HTTPException(status_code=400, detail="Você não pode desativar a si mesmo")
+        raise HTTPException(status_code=400, detail="Você não pode deletar a si mesmo")
 
-    user.active = False
+    # Remove especialista vinculado (se houver)
+    from db.database import Especialista, Transferencia
+    esp = db.query(Especialista).filter(Especialista.email == user.email).first()
+    if esp:
+        db.query(Transferencia).filter(Transferencia.especialista_id == esp.id).delete()
+        db.delete(esp)
+
+    db.delete(user)
+    db.commit()
+
+    return {"ok": True, "mensagem": "Usuário deletado permanentemente"}
+
+
+# ── ESQUECI MINHA SENHA ───────────────────────────────────────────────────────
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+@router.post("/forgot-password")
+def forgot_password(dados: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    """Solicita redefinição de senha — gera senha temporária."""
+    email = dados.email.lower().strip()
+    user = db.query(User).filter(User.email == email).first()
+
+    if not user:
+        return {"erro": "E-mail não encontrado no sistema"}
+
+    # Gera senha temporária
+    import random, string
+    temp_pass = ''.join(random.choices(string.ascii_letters + string.digits, k=8))
+    user.password_hash = hash_password(temp_pass)
     user.updated_at = datetime.utcnow()
     db.commit()
 
-    return {"ok": True}
+    # Tenta notificar admin via WhatsApp
+    try:
+        import os
+        from integrations.whatsapp import _enviar
+        admin_phone = os.getenv("ADMIN_WHATSAPP", "")
+        if admin_phone:
+            _enviar(admin_phone,
+                f"🔑 Senha redefinida!\n\n"
+                f"Usuário: {user.name} ({user.email})\n"
+                f"Nova senha temporária: {temp_pass}\n\n"
+                f"Passe essa senha pro usuário e peça pra trocar depois.")
+    except:
+        pass
+
+    print(f"🔑 Senha temporária gerada para {user.email}: {temp_pass}")
+    return {"mensagem": "Uma nova senha temporária foi gerada. Entre em contato com o administrador para recebê-la."}
+
+
+# ── RESET SENHA (master) ─────────────────────────────────────────────────────
+
+class ResetPasswordRequest(BaseModel):
+    user_id: str
+    new_password: str
+
+@router.post("/reset-password")
+def reset_password(dados: ResetPasswordRequest, master: User = Depends(require_master), db: Session = Depends(get_db)):
+    """Master reseta a senha de um usuário."""
+    user = db.get(User, dados.user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado")
+
+    user.password_hash = hash_password(dados.new_password)
+    user.updated_at = datetime.utcnow()
+    db.commit()
+
+    return {"ok": True, "mensagem": f"Senha de {user.name} redefinida com sucesso"}

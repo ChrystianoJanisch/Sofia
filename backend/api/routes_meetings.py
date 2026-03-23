@@ -271,3 +271,45 @@ def cancelar_meeting(meeting_id: str, db: Session = Depends(get_db)):
     meeting.updated_at = datetime.utcnow()
     db.commit()
     return {"ok": True}
+
+
+# ─────────────────────────────────────────────
+# API — Gravação e Transcrição
+# ─────────────────────────────────────────────
+
+@router.post("/api/meetings/{meeting_id}/iniciar-gravacao")
+def api_iniciar_gravacao(meeting_id: str, db: Session = Depends(get_db)):
+    """Inicia gravação manualmente."""
+    meeting = db.get(Meeting, meeting_id)
+    if not meeting or not meeting.room_name:
+        return {"erro": "Reunião não encontrada"}
+
+    from integrations.daily import iniciar_gravacao
+    resultado = iniciar_gravacao(meeting.room_name)
+    return resultado
+
+
+@router.post("/api/meetings/{meeting_id}/parar-gravacao")
+def api_parar_gravacao(meeting_id: str, db: Session = Depends(get_db)):
+    """Para gravação manualmente."""
+    meeting = db.get(Meeting, meeting_id)
+    if not meeting or not meeting.room_name:
+        return {"erro": "Reunião não encontrada"}
+
+    from integrations.daily import parar_gravacao
+    resultado = parar_gravacao(meeting.room_name)
+    return resultado
+
+
+@router.get("/api/meetings/{meeting_id}/transcricao")
+def api_transcricao(meeting_id: str, db: Session = Depends(get_db)):
+    """Retorna transcrição e resumo de uma reunião."""
+    meeting = db.get(Meeting, meeting_id)
+    if not meeting:
+        return {"erro": "Reunião não encontrada"}
+
+    return {
+        "transcricao": meeting.transcricao_reuniao or "",
+        "resumo": meeting.resumo_reuniao or "",
+        "recording_url": meeting.recording_url or "",
+    }
