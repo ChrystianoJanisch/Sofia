@@ -983,7 +983,7 @@
             <h2 id="ml-title">Novo Lead</h2>
             <div class="field"><label>Nome</label><input id="ml-name" placeholder="Nome do cliente"></div>
             <div class="field"><label>Empresa</label><input id="ml-company" placeholder="Razão social"></div>
-            <div class="field"><label>CNPJ</label><input id="ml-cnpj" placeholder="00.000.000/0000-00"></div>
+            <div class="field"><label>CNPJ</label><input id="ml-cnpj" placeholder="00.000.000/0000-00" maxlength="18" oninput="mascaraCNPJ(this)"></div>
             <div class="field"><label>Telefone</label><input id="ml-phone" placeholder="51999998888" type="tel"></div>
             <div class="field"><label>WhatsApp <span class="hint">(se diferente)</span></label><input id="ml-wpp"
                     placeholder="Mesmo se vazio" type="tel"></div>
@@ -1188,6 +1188,7 @@
         function switchTab(t, btn) { document.querySelectorAll('.tab').forEach(function (b) { b.classList.remove('active') }); btn.classList.add('active'); document.querySelectorAll('.page').forEach(function (p) { p.classList.remove('active') }); document.getElementById('page-' + t).classList.add('active') }
         function toast(m, t) { var e = document.createElement('div'); e.className = 'toast ' + (t || 'info'); e.textContent = m; document.getElementById('toasts').appendChild(e); setTimeout(function () { e.remove() }, 4000) }
         function esc(s) { return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/'/g, '&#39;') }
+        function mascaraCNPJ(el) { var v = el.value.replace(/\D/g, '').slice(0, 14); if (v.length > 12) v = v.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{1,2})/, '$1.$2.$3/$4-$5'); else if (v.length > 8) v = v.replace(/^(\d{2})(\d{3})(\d{3})(\d{1,4})/, '$1.$2.$3/$4'); else if (v.length > 5) v = v.replace(/^(\d{2})(\d{3})(\d{1,3})/, '$1.$2.$3'); else if (v.length > 2) v = v.replace(/^(\d{2})(\d{1,3})/, '$1.$2'); el.value = v }
         function fmtTel(t) { if (!t) return '—'; var d = t.replace(/\D/g, '').replace(/^55/, ''); if (d.length === 11) return '(' + d.slice(0, 2) + ') ' + d.slice(2, 7) + '-' + d.slice(7); if (d.length === 10) return '(' + d.slice(0, 2) + ') ' + d.slice(2, 6) + '-' + d.slice(6); return t }
         function loadAll() { loadLeads(); loadMeetings(); loadCallbacks(); loadEspecialistas() }
         function loadLeads() { var url = API() + '/api/leads/'; dbg('Fetching: ' + url + ' (origin: ' + window.location.origin + ')'); authFetch(url).then(function (r) { dbg('Leads response: ' + r.status + ' ' + r.statusText); if (!r.ok) throw new Error('HTTP ' + r.status); return r.json() }).then(function (d) { leads = Array.isArray(d) ? d : (d.leads || d.items || []); crmStats(); crmRender(); dbg('Leads OK: ' + leads.length + ' items'); toast('Leads: ' + leads.length, 'success') }).catch(function (e) { dbg('Leads ERRO: ' + e.message + ' | URL: ' + url); toast('Erro leads: ' + e.message, 'error') }) }
