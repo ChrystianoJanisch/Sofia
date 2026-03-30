@@ -72,6 +72,7 @@ class Lead(Base):
     wpp_phone     = Column(String, default="")    # WhatsApp diferente do telefone da ligação
     ia_pausada    = Column(Boolean, default=False) # True = IA não responde, humano atende
     especialista_id = Column(String, default="")   # ID do especialista atendendo
+    parceira_indicada = Column(String, default="") # Tópico de parceira detectado na ligação
     created_at    = Column(DateTime, default=datetime.utcnow)
     updated_at    = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -293,6 +294,7 @@ def _migrar_colunas():
         "ALTER TABLE leads ADD COLUMN IF NOT EXISTS company VARCHAR DEFAULT ''",
         "ALTER TABLE leads ADD COLUMN IF NOT EXISTS ia_pausada BOOLEAN DEFAULT FALSE",
         "ALTER TABLE leads ADD COLUMN IF NOT EXISTS especialista_id VARCHAR DEFAULT ''",
+        "ALTER TABLE leads ADD COLUMN IF NOT EXISTS parceira_indicada VARCHAR DEFAULT ''",
         """CREATE TABLE IF NOT EXISTS especialistas (
             id VARCHAR PRIMARY KEY,
             nome VARCHAR NOT NULL,

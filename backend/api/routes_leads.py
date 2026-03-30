@@ -3,7 +3,7 @@ from fastapi import UploadFile, File
 from pydantic import BaseModel
 from typing import Optional
 from sqlalchemy.orm import Session
-from db.database import get_db, Lead, CallSession, Meeting, WppMensagem, Callback, normalizar_telefone
+from db.database import get_db, Lead, CallSession, Meeting, WppMensagem, Callback, Transferencia, normalizar_telefone
 from datetime import datetime
 import csv, io
 
@@ -63,6 +63,7 @@ def listar_leads(db: Session = Depends(get_db)):
             "call_attempts": l.call_attempts,
             "last_call_at": str(l.last_call_at) if l.last_call_at else None,
             "ia_pausada"  : getattr(l, 'ia_pausada', False) or False,
+            "parceira_indicada": getattr(l, 'parceira_indicada', '') or '',
             "created_at"  : str(l.created_at)
         }
         for l in leads
@@ -100,6 +101,7 @@ def deletar_lead(lead_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Lead não encontrado")
 
     # Deleta filhos primeiro
+    db.query(Transferencia).filter(Transferencia.lead_id == lead_id).delete()
     db.query(WppMensagem).filter(WppMensagem.lead_id == lead_id).delete()
     db.query(CallSession).filter(CallSession.lead_id == lead_id).delete()
     db.query(Meeting).filter(Meeting.lead_id == lead_id).delete()

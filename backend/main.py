@@ -54,9 +54,6 @@ async def startup():
     import asyncio
     asyncio.create_task(executar_callbacks())
     asyncio.create_task(executar_followups())
-    # Configura webhook do Daily.co para receber gravações
-    from integrations.daily import configurar_webhook_gravacao
-    configurar_webhook_gravacao()
     print("🚀 Julia v6.2 — Auth + Agenda + WhatsApp + Callbacks + Gravação — Pronta!")
 
 

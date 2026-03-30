@@ -37,7 +37,7 @@ def fazer_ligacao(phone: str, nome: str = "") -> str:
     if not ELEVENLABS_PHONE_NUMBER_ID:
         raise Exception("ELEVENLABS_PHONE_NUMBER_ID não configurado")
 
-    url = "https://api.elevenlabs.io/v1/convai/twilio/outbound-call"
+    url = "https://api.elevenlabs.io/v1/convai/sip-trunk/outbound-call"
     headers = {
         "xi-api-key": ELEVENLABS_API_KEY,
         "Content-Type": "application/json"
@@ -46,19 +46,6 @@ def fazer_ligacao(phone: str, nome: str = "") -> str:
         "agent_id": ELEVENLABS_AGENT_ID,
         "agent_phone_number_id": ELEVENLABS_PHONE_NUMBER_ID,
         "to_number": numero,
-        "telephony_call_config": {
-            "ringing_timeout_secs": 20
-        },
-        "twilio_params": {
-            "machine_detection": "DetectMessageEnd",
-            "machine_detection_timeout": "3",
-            "machine_detection_speech_threshold": "1800",
-            "machine_detection_speech_end_threshold": "800",
-            "machine_detection_silence_timeout": "3000",
-            "async_amd": "true",
-            "async_amd_status_callback": (os.getenv("WEBHOOK_BASE_URL", "") + "/api/calls/amd-status"),
-            "async_amd_status_callback_method": "POST"
-        },
         "conversation_initiation_client_data": {
             "dynamic_variables": {
                 "nome_cliente": nome or "cliente",
@@ -68,7 +55,7 @@ def fazer_ligacao(phone: str, nome: str = "") -> str:
     }
 
     print(f"📞 [Dialer] Enviando request para ElevenLabs...")
-    response = requests.post(url, headers=headers, json=payload, timeout=15)
+    response = requests.post(url, headers=headers, json=payload, timeout=60)
     print(f"📞 [Dialer] Status: {response.status_code}")
     print(f"📞 [Dialer] Resposta completa: {response.text}")
 
@@ -76,7 +63,7 @@ def fazer_ligacao(phone: str, nome: str = "") -> str:
         raise Exception(f"Erro ElevenLabs outbound: {response.status_code} — {response.text}")
 
     data = response.json()
-    conversation_id = data.get("conversation_id") or data.get("call_id") or data.get("id") or ""
+    conversation_id = data.get("conversation_id") or data.get("sip_call_id") or data.get("call_id") or data.get("id") or ""
 
     if not conversation_id:
         print(f"⚠️ [Dialer] ATENÇÃO: ElevenLabs retornou 200 mas sem conversation_id!")

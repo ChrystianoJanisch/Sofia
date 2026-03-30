@@ -175,11 +175,6 @@ def configurar_webhook_gravacao():
 
         payload = {
             "url": webhook_url,
-            "event_types": [
-                "recording.ready-to-download",
-                "recording.started",
-                "recording.error",
-            ]
         }
         res = requests.post(f"{DAILY_BASE_URL}/webhooks", json=payload, headers=HEADERS, timeout=10)
         if res.status_code in (200, 201):

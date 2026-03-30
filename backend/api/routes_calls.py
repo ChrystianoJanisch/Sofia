@@ -22,6 +22,94 @@ def _get_wpp_phone(lead) -> str:
     return lead.wpp_phone if lead.wpp_phone and lead.wpp_phone.strip() else lead.phone
 
 
+def _detectar_topico_rs_company(transcricao: str) -> dict | None:
+    """
+    Analisa a transcrição pra ver se o lead mencionou tópicos tratados pela RS Company
+    (serviços que a FLC Bank não oferece).
+    Retorna {"detectado": True, "topico": "...", "trecho": "..."} ou None.
+    """
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{
+                "role": "user",
+                "content": (
+                    "Analise essa transcrição de ligação comercial.\n\n"
+                    "A Julia é consultora da FLC Bank, que oferece: crédito para negativados, "
+                    "crédito empresarial, capital de giro, antecipação de recebíveis, "
+                    "consórcio, financiamentos.\n\n"
+                    "Verifique se o cliente mencionou interesse ou necessidade em algum destes "
+                    "OUTROS serviços (que a FLC Bank NÃO oferece, mas a RS Company oferece):\n"
+                    "- Proteção patrimonial / blindagem patrimonial\n"
+                    "- Planejamento tributário / redução de impostos\n"
+                    "- Holding patrimonial\n"
+                    "- Conta Protegida (proteção contra bloqueios judiciais)\n"
+                    "- Tributário / passivos fiscais / dívida ativa / regularização fiscal\n"
+                    "- Consultoria tributária\n\n"
+                    "ATENÇÃO: Só conte se o CLIENTE demonstrou interesse real nesses serviços, "
+                    "não se a Julia apenas mencionou que não trabalha com isso.\n\n"
+                    "Se detectou, responda APENAS em JSON:\n"
+                    "{\"detectado\": true, \"topico\": \"nome do serviço\", "
+                    "\"trecho\": \"frase exata do cliente que indicou o interesse\"}\n\n"
+                    "Se NÃO detectou:\n"
+                    "{\"detectado\": false}\n\n"
+                    f"Transcrição:\n{transcricao[-3000:]}\n\n"
+                    "Responda APENAS o JSON, sem texto antes ou depois."
+                )
+            }],
+            max_tokens=200,
+            temperature=0
+        )
+
+        import json as _json
+        texto = resp.choices[0].message.content.strip()
+        texto = texto.replace("```json", "").replace("```", "").strip()
+        resultado = _json.loads(texto)
+
+        if resultado.get("detectado"):
+            return resultado
+
+    except Exception as e:
+        print(f"⚠️ Erro ao detectar tópico RS Company: {e}")
+
+    return None
+
+
+def _extrair_nome_da_transcricao(transcricao: str) -> str | None:
+    """
+    Extrai o nome completo que o cliente disse durante a ligação.
+    Retorna o nome ou None se não encontrado.
+    """
+    try:
+        from openai import OpenAI
+        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": (
+                "Nessa transcrição de ligação, o cliente disse seu nome completo em algum momento?\n\n"
+                "Regras:\n"
+                "- Se o cliente disse o nome completo (nome + sobrenome), retorne APENAS o nome\n"
+                "- Se disse só o primeiro nome, retorne APENAS o primeiro nome\n"
+                "- Se NÃO disse o nome, responda: DESCONHECIDO\n"
+                "- Não invente, não complete — só o que o cliente disse\n\n"
+                f"Transcrição:\n{transcricao[-2000:]}\n\n"
+                "Responda APENAS o nome ou DESCONHECIDO."
+            )}],
+            max_tokens=30,
+            temperature=0
+        )
+        resultado = resp.choices[0].message.content.strip()
+        if resultado == "DESCONHECIDO" or not resultado:
+            return None
+        return resultado
+    except Exception as e:
+        print(f"⚠️ Erro ao extrair nome da transcrição: {e}")
+        return None
+
+
 def _extrair_whatsapp_da_transcricao(transcricao: str, phone_original: str = "") -> str | None:
     """
     Analisa a transcrição da ligação pra ver se o cliente passou um
@@ -359,7 +447,13 @@ async def pos_chamada(request: Request, db: Session = Depends(get_db)):
     lead.urgency       = classificacao.get("urgencia") or ""
     lead.agendado_hora = None
 
-    # ✅ NOVO: Extrai número de WhatsApp da transcrição (se o cliente passou um diferente)
+    # ✅ Extrai nome completo da transcrição e atualiza lead
+    nome_extraido = _extrair_nome_da_transcricao(transcricao_texto)
+    if nome_extraido:
+        lead.name = nome_extraido
+        print(f"👤 Nome extraído da transcrição: '{nome_extraido}'")
+
+    # ✅ Extrai número de WhatsApp da transcrição (se o cliente passou um diferente)
     wpp_extraido = _extrair_whatsapp_da_transcricao(transcricao_texto, phone_original=lead.phone)
     if wpp_extraido:
         lead.wpp_phone = wpp_extraido
@@ -368,6 +462,36 @@ async def pos_chamada(request: Request, db: Session = Depends(get_db)):
     numero_wpp = _get_wpp_phone(lead)
 
     temp = classificacao.get("temperatura", "cold")
+
+    # ── TÓPICO RS COMPANY: Detecta se lead mencionou serviço da parceira ─
+    topico_rs = _detectar_topico_rs_company(transcricao_texto)
+    if topico_rs:
+        topico_nome = topico_rs.get("topico", "serviço patrimonial/tributário")
+        trecho = topico_rs.get("trecho", "")
+        lead.parceira_indicada = f"RS Company: {topico_nome}"
+        db.commit()
+        print(f"🏛️ Tópico RS Company detectado: '{topico_nome}' — {lead.name} ({lead.phone})")
+        try:
+            admin_wpp = os.getenv("ADMIN_WHATSAPP", "")
+            if admin_wpp:
+                from integrations.whatsapp import _enviar, _formatar_numero
+                nome = lead.name or "—"
+                telefone = lead.phone or "—"
+                resumo = classificacao.get("resumo", "—")
+                msg_alerta = (
+                    f"🔔 *Alerta RS Company — Lead interessado*\n\n"
+                    f"*Nome:* {nome}\n"
+                    f"*Telefone:* {telefone}\n"
+                    f"*Interesse:* {topico_nome}\n"
+                    f"*Resumo:* {resumo}\n"
+                    + (f"*Trecho:* _{trecho}_\n" if trecho else "")
+                    + f"\nEntrar em contato para apresentar os serviços da RS Company."
+                )
+                _enviar(_formatar_numero(admin_wpp), msg_alerta)
+            else:
+                print("⚠️ ADMIN_WHATSAPP não configurado — alerta RS Company não enviado")
+        except Exception as e:
+            print(f"⚠️ Erro ao enviar alerta RS Company: {e}")
 
     # ── CALLBACK: Detecta se cliente pediu pra ligar depois ──────────────
     from api.callback_scheduler import _extrair_callback_da_transcricao, agendar_callback

@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cp -r \"c:/Users/janis/Dev/ia-prospeccao/cliente-flc/sofia-ai/backend\" \"c:/Users/janis/Dev/ia-prospeccao/cliente-flc/nami-ia/backend\")",
+      "Bash(cp \"c:/Users/janis/Dev/ia-prospeccao/cliente-flc/sofia-ai/Procfile\" \"c:/Users/janis/Dev/ia-prospeccao/cliente-flc/nami-ia/\")",
+      "Bash(cp \"c:/Users/janis/Dev/ia-prospeccao/cliente-flc/sofia-ai/runtime.txt\" \"c:/Users/janis/Dev/ia-prospeccao/cliente-flc/nami-ia/\")",
+      "Bash(cp \"c:/Users/janis/Dev/ia-prospeccao/cliente-flc/sofia-ai/.gitignore\" \"c:/Users/janis/Dev/ia-prospeccao/cliente-flc/nami-ia/\")",
+      "Bash(cp \"c:/Users/janis/Dev/ia-prospeccao/cliente-flc/sofia-ai/.python-version\" \"c:/Users/janis/Dev/ia-prospeccao/cliente-flc/nami-ia/\")",
+      "Bash(mkdir -p \"c:/Users/janis/Dev/ia-prospeccao/cliente-flc/nami-ia\")",
+      "Read(//c/Users/janis/Dev/ia-prospeccao/cliente-flc/**)",
+      "Bash(git rm:*)",
+      "Bash(git add:*)"
+    ]
+  }
+}
