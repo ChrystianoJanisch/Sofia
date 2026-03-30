@@ -44,6 +44,7 @@ class Lead(Base):
     phone         = Column(String, nullable=False)
     email         = Column(String, default="")
     company       = Column(String, default="")
+    cnpj          = Column(String, default="")
 
     stage         = Column(String, default="novo")
 
@@ -292,6 +293,7 @@ def _migrar_colunas():
         "ALTER TABLE meetings ADD COLUMN IF NOT EXISTS token_guest VARCHAR DEFAULT ''",
         "ALTER TABLE leads ADD COLUMN IF NOT EXISTS meetings_count INTEGER DEFAULT 0",
         "ALTER TABLE leads ADD COLUMN IF NOT EXISTS company VARCHAR DEFAULT ''",
+        "ALTER TABLE leads ADD COLUMN IF NOT EXISTS cnpj VARCHAR DEFAULT ''",
         "ALTER TABLE leads ADD COLUMN IF NOT EXISTS ia_pausada BOOLEAN DEFAULT FALSE",
         "ALTER TABLE leads ADD COLUMN IF NOT EXISTS especialista_id VARCHAR DEFAULT ''",
         "ALTER TABLE leads ADD COLUMN IF NOT EXISTS parceira_indicada VARCHAR DEFAULT ''",

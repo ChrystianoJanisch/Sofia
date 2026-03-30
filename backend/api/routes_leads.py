@@ -14,6 +14,7 @@ class LeadCreate(BaseModel):
     phone: str
     email: Optional[str] = None
     company: Optional[str] = None
+    cnpj: Optional[str] = None
 
 class LeadUpdate(BaseModel):
     name:  Optional[str] = None
@@ -21,6 +22,7 @@ class LeadUpdate(BaseModel):
     wpp_phone: Optional[str] = None
     email: Optional[str] = None
     company: Optional[str] = None
+    cnpj: Optional[str] = None
     stage: Optional[str] = None
 
 
@@ -34,7 +36,7 @@ def criar_lead(dados: LeadCreate, db: Session = Depends(get_db)):
     if existente:
         return {"erro": f"Lead já existe com esse número: {existente.name or 'sem nome'}", "id": existente.id}
 
-    lead = Lead(name=dados.name, phone=phone_norm, email=dados.email, company=dados.company or "")
+    lead = Lead(name=dados.name, phone=phone_norm, email=dados.email, company=dados.company or "", cnpj=dados.cnpj or "")
     db.add(lead)
     db.commit()
     db.refresh(lead)
@@ -52,6 +54,7 @@ def listar_leads(db: Session = Depends(get_db)):
             "wpp_phone"   : l.wpp_phone or "",
             "email"       : l.email,
             "company"     : getattr(l, 'company', '') or '',
+            "cnpj"        : getattr(l, 'cnpj', '') or '',
             "stage"       : l.stage,
             "temperature" : l.temperature,
             "product"     : l.product,
@@ -88,6 +91,7 @@ def atualizar_lead(lead_id: str, dados: LeadUpdate, db: Session = Depends(get_db
     if dados.wpp_phone is not None: lead.wpp_phone = normalizar_telefone(dados.wpp_phone) if dados.wpp_phone.strip() else ""
     if dados.email is not None: lead.email = dados.email
     if dados.company is not None: lead.company = dados.company
+    if dados.cnpj is not None: lead.cnpj = dados.cnpj
     if dados.stage is not None: lead.stage = dados.stage
     lead.updated_at = datetime.utcnow()
     db.commit()
