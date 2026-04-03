@@ -13,7 +13,7 @@ from db.database import get_db, User
 
 # ── CONFIG ────────────────────────────────────────────────────────────────────
 
-SECRET_KEY = os.getenv("JWT_SECRET_KEY", os.getenv("ELEVENLABS_API_KEY", "flcbank-secret-key-change-me"))
+SECRET_KEY = os.getenv("JWT_SECRET_KEY", os.getenv("ELEVENLABS_API_KEY", "change-me-in-production"))
 ALGORITHM = "HS256"
 TOKEN_EXPIRE_HOURS = 24
 

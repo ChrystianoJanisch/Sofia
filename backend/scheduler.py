@@ -4,11 +4,15 @@ Roda como background task no startup do FastAPI.
 Verifica a cada 5 minutos se há reuniões na próxima hora
 e envia lembrete no WhatsApp.
 """
-import asyncio
+import asyncio, os
 from datetime import datetime, timedelta, timezone
 from db.database import SessionLocal, Meeting, Lead
 
 BR_TZ = timezone(timedelta(hours=-3))
+
+# Variáveis de configuração da IA
+IA_NAME = os.getenv("IA_NAME", "Julia")
+EMPRESA_NOME = os.getenv("EMPRESA_NOME", "FLC Bank")
 
 
 def _get_wpp_phone(lead) -> str:
@@ -33,7 +37,7 @@ def _enviar_lembrete(lead, meeting):
     tipo_texto = "vídeo chamada 🎥" if meeting.tipo in ("meet", "video_chamada", "video") else "ligação telefônica 📞"
 
     msg = (
-        f"Olá {nome}! 😊 Aqui é a Sofia da FLC Bank.\n\n"
+        f"Olá {nome}! 😊 Aqui é a {IA_NAME} da {EMPRESA_NOME}.\n\n"
         f"Só passando pra lembrar que sua reunião com nosso especialista "
         f"está marcada pra hoje às {hora}.\n\n"
         f"Tipo: {tipo_texto}\n"

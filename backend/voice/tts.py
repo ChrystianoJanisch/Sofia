@@ -9,13 +9,17 @@ load_dotenv()
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 VOICE_ID           = os.getenv("ELEVENLABS_VOICE_ID")
 
+# Variáveis de configuração da IA
+IA_NAME = os.getenv("IA_NAME", "Julia")
+EMPRESA_NOME = os.getenv("EMPRESA_NOME", "FLC Bank")
+
 # Pasta de cache (áudios pré-gerados ficam aqui entre chamadas)
 CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "static", "cache")
 os.makedirs(CACHE_DIR, exist_ok=True)
 
 # Frases pré-geradas ao iniciar o servidor (chame gerar_cache_inicial())
 FRASES_CACHE = [
-    "Olá! Aqui é a Sofia. Tudo bem? Estou ligando porque temos condições especiais de crédito, com acesso a mais de sessenta instituições financeiras. Posso te apresentar as opções?",
+    f"Olá! Aqui é a {IA_NAME}. Tudo bem? Estou ligando porque temos condições especiais de crédito, com acesso a mais de sessenta instituições financeiras. Posso te apresentar as opções?",
     "Entendi! Poderia me dizer qual o valor que você precisa e para qual finalidade?",
     "?",
     "Perfeito! Temos ótimas condições para isso. Você tem alguma restrição no CPF atualmente?",

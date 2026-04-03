@@ -870,7 +870,6 @@
             <span id="user-info" style="font-size:10px;color:var(--gold);letter-spacing:1px"></span>
             <a href="/painel-especialista" id="btn-painel" class="btn btn-gold"
                 style="display:none;text-decoration:none;font-size:8px;padding:5px 10px">PAINEL</a>
-            <button class="btn btn-outline" onclick="loadAll()">↻</button>
             <button class="btn btn-outline" onclick="doLogout()" title="Sair">⏻</button>
         </div>
     </div>
@@ -1315,6 +1314,7 @@
         document.addEventListener('keydown', function (e) { if (e.key === 'Escape') { fecharModalLead(); fecharModalReuniao(); fecharModalUser() } });
         if (IS_MASTER) loadUsers();
         loadAll();
+        setInterval(loadAll, 5000);
     </script>
 </body>
 

@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./sofia.db")
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./ia_prospeccao.db")
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
@@ -252,7 +252,7 @@ def _seed_master_user():
         if existing:
             return  # Já tem master
 
-        email = os.getenv("MASTER_EMAIL", "admin@flcbank.com.br")
+        email = os.getenv("MASTER_EMAIL", "admin@empresa.com.br")
         password = os.getenv("MASTER_PASSWORD", "")
         name = os.getenv("MASTER_NAME", "Administrador")
 

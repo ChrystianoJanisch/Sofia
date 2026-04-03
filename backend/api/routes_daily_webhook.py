@@ -12,6 +12,9 @@ from datetime import datetime
 
 router = APIRouter()
 
+# Variáveis de configuração da IA
+EMPRESA_NOME = os.getenv("EMPRESA_NOME", "FLC Bank")
+
 
 @router.post("/webhook")
 async def daily_webhook(request: Request):
@@ -238,7 +241,7 @@ def _gerar_resumo_reuniao(transcricao: str, nome_lead: str = "") -> str:
             model="gpt-4o-mini",
             messages=[{
                 "role": "user",
-                "content": f"""Resuma esta transcrição de reunião comercial da FLC Bank com o cliente {nome_lead}.
+                "content": f"""Resuma esta transcrição de reunião comercial da {EMPRESA_NOME} com o cliente {nome_lead}.
 
 Inclua:
 - Principais pontos discutidos

@@ -12,6 +12,10 @@ from voice.dialer import fazer_ligacao
 
 BRT = timezone(timedelta(hours=-3))
 
+# Variáveis de configuração da IA
+IA_NAME = os.getenv("IA_NAME", "Julia")
+EMPRESA_NOME = os.getenv("EMPRESA_NOME", "FLC Bank")
+
 
 def _agora_brt() -> datetime:
     return datetime.now(BRT).replace(tzinfo=None)
@@ -164,7 +168,7 @@ async def executar_callbacks():
                 print(f"📞 Executando callback: {lead.name} ({lead.phone}) — agendado pra {cb.scheduled_at.strftime('%H:%M')}")
 
                 try:
-                    conversation_id = fazer_ligacao(lead.phone, lead.name or "")
+                    conversation_id = fazer_ligacao(lead.phone, lead.name or "", lead.company or "", lead.cnpj or "")
                     lead.stage = "ligando"
                     lead.call_attempts += 1
                     lead.last_call_at = datetime.utcnow()
@@ -200,7 +204,7 @@ def _gerar_msg_followup(lead_name: str, resumo: str = "", produto: str = "") -> 
     if produto:
         contexto += f"Produto de interesse: {produto}\n"
 
-    prompt = f"""Você é Julia, consultora da FLC Bank. Gere UMA mensagem curta de follow-up 
+    prompt = f"""Você é {IA_NAME}, consultora da {EMPRESA_NOME}. Gere UMA mensagem curta de follow-up
 para enviar pelo WhatsApp a um cliente que demonstrou interesse mas ainda não agendou reunião.
 
 Nome do cliente: {lead_name or 'cliente'}
@@ -229,7 +233,7 @@ Responda APENAS a mensagem, sem aspas nem explicação."""
         print(f"⚠️ Erro ao gerar follow-up: {e}")
         nome = lead_name or ""
         return (
-            f"Oi{' ' + nome if nome else ''}! Aqui é a Julia da FLC Bank. 😊\n\n"
+            f"Oi{' ' + nome if nome else ''}! Aqui é a {IA_NAME} da {EMPRESA_NOME}. 😊\n\n"
             f"Estou passando pra saber se você ainda tem interesse em conversar "
             f"sobre as soluções de crédito que comentamos. Posso te ajudar em algo?"
         )

@@ -12,6 +12,10 @@ import os, json, asyncio, uuid, re
 
 router = APIRouter()
 
+# Variáveis de configuração da IA
+IA_NAME = os.getenv("IA_NAME", "Julia")
+EMPRESA_NOME = os.getenv("EMPRESA_NOME", "FLC Bank")
+
 ELEVENLABS_WEBHOOK_SECRET = os.getenv("ELEVENLABS_WEBHOOK_SECRET", "")
 
 
@@ -38,11 +42,11 @@ def _detectar_topico_rs_company(transcricao: str) -> dict | None:
                 "role": "user",
                 "content": (
                     "Analise essa transcrição de ligação comercial.\n\n"
-                    "A Julia é consultora da FLC Bank, que oferece: crédito para negativados, "
+                    f"A {IA_NAME} é consultora da {EMPRESA_NOME}, que oferece: crédito para negativados, "
                     "crédito empresarial, capital de giro, antecipação de recebíveis, "
                     "consórcio, financiamentos.\n\n"
                     "Verifique se o cliente mencionou interesse ou necessidade em algum destes "
-                    "OUTROS serviços (que a FLC Bank NÃO oferece, mas a RS Company oferece):\n"
+                    f"OUTROS serviços (que a {EMPRESA_NOME} NÃO oferece, mas a RS Company oferece):\n"
                     "- Proteção patrimonial / blindagem patrimonial\n"
                     "- Planejamento tributário / redução de impostos\n"
                     "- Holding patrimonial\n"
@@ -126,7 +130,7 @@ def _extrair_whatsapp_da_transcricao(transcricao: str, phone_original: str = "")
             messages=[{
                 "role": "user",
                 "content": (
-                    "Analise essa transcrição de ligação. A Julia perguntou se o número "
+                    f"Analise essa transcrição de ligação. A {IA_NAME} perguntou se o número "
                     "da ligação tem WhatsApp.\n\n"
                     "REGRAS:\n"
                     "- Se o cliente disse que o MESMO número tem WhatsApp → responda: MESMO\n"
@@ -190,7 +194,7 @@ def _montar_msg_nao_atendeu(nome: str) -> str:
     saudacao = f"Olá {nome.strip()}! 👋 " if nome and nome.strip() else "Olá! 👋 "
     return (
         saudacao +
-        "Aqui é a Julia da FLC Bank. "
+        f"Aqui é a {IA_NAME} da {EMPRESA_NOME}. "
         "Tentei te ligar agora mas não consegui falar com você. "
         "Liguei porque a gente é especializada em crédito para negativados e reestruturação financeira de empresas — "
         "trabalhamos com mais de 60 instituições e conseguimos opções que banco tradicional não oferece. "
@@ -257,7 +261,7 @@ def ligar(dados: LigarPayload, db: Session = Depends(get_db)):
 
         print(f"📞 Tentando ligar para {lead.name} ({lead.phone}) — stage: {lead.stage}")
         try:
-            conversation_id = fazer_ligacao(lead.phone, lead.name or "")
+            conversation_id = fazer_ligacao(lead.phone, lead.name or "", lead.company or "", lead.cnpj or "")
         except Exception as e:
             print(f"❌ Erro ao ligar para {lead.name}: {e}")
             return {"erro": f"Falha na ligação: {str(e)}"}
@@ -275,7 +279,9 @@ def ligar(dados: LigarPayload, db: Session = Depends(get_db)):
         if lead_existente and lead_existente.stage not in ("novo", "nao_atendeu"):
             return {"erro": f"Número já existe no CRM — stage: {lead_existente.stage}"}
 
-        conversation_id = fazer_ligacao(dados.phone or "", dados.name or "")
+        empresa = (lead_existente.company or "") if lead_existente else ""
+        cnpj = (lead_existente.cnpj or "") if lead_existente else ""
+        conversation_id = fazer_ligacao(dados.phone or "", dados.name or "", empresa, cnpj)
         return {"mensagem": "Ligação iniciada!", "conversation_id": conversation_id}
 
 
@@ -318,7 +324,7 @@ async def _executar_lote(lead_ids: list, intervalo: int):
                 continue
             try:
                 print(f"📞 Lote [{i+1}/{len(lead_ids)}] — {lead.name} ({lead.phone})")
-                conv_id = fazer_ligacao(lead.phone, lead.name or "")
+                conv_id = fazer_ligacao(lead.phone, lead.name or "", lead.company or "", lead.cnpj or "")
                 lead.stage         = "ligando"
                 lead.call_attempts += 1
                 lead.last_call_at  = datetime.utcnow()
@@ -376,7 +382,7 @@ async def pos_chamada(request: Request, db: Session = Depends(get_db)):
         if not content:
             continue
         historico.append({"role": role, "content": content})
-        quem = "Cliente" if role == "user" else "Julia"
+        quem = "Cliente" if role == "user" else IA_NAME
         transcricao_texto += f"{quem}: {content}\n"
 
     # ── Cliente não falou nada ───────────────────────────────────────────
@@ -513,7 +519,7 @@ async def pos_chamada(request: Request, db: Session = Depends(get_db)):
             dia_txt = "hoje" if periodo == "hoje" else "amanhã"
             nome = lead.name or ""
             msg_callback = (
-                f"Oi{' ' + nome if nome else ''}! 😊 Aqui é a Julia da FLC Bank.\n\n"
+                f"Oi{' ' + nome if nome else ''}! 😊 Aqui é a {IA_NAME} da {EMPRESA_NOME}.\n\n"
                 f"Conforme combinamos, vou te ligar {dia_txt} às {horario}.\n\n"
                 f"Se preferir, podemos conversar por aqui mesmo pelo WhatsApp! "
                 f"É só me responder. 💬"
@@ -554,7 +560,7 @@ async def pos_chamada(request: Request, db: Session = Depends(get_db)):
         saudacao = f"Olá {lead.name}! 😊 " if lead.name else "Olá! 😊 "
         msg_agendamento = (
             saudacao +
-            "Aqui é a Julia da FLC Bank. "
+            f"Aqui é a {IA_NAME} da {EMPRESA_NOME}. "
             "Foi ótimo conversar com você! 😊\n\n"
             "Vamos prosseguir para o agendamento ou ficou com alguma dúvida sobre o que conversamos? "
             "Pode me perguntar aqui que eu te ajudo!"

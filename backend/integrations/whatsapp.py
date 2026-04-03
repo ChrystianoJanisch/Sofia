@@ -1,5 +1,9 @@
 import os, requests
 
+# Variáveis de configuração da IA
+IA_NAME = os.getenv("IA_NAME", "Julia")
+EMPRESA_NOME = os.getenv("EMPRESA_NOME", "FLC Bank")
+
 EVOLUTION_URL      = os.getenv("EVOLUTION_API_URL", "")
 EVOLUTION_KEY      = os.getenv("EVOLUTION_API_KEY", "")
 EVOLUTION_INSTANCE = os.getenv("EVOLUTION_INSTANCE", "IA")
@@ -37,7 +41,7 @@ def enviar_whatsapp(phone: str, nome: str, mensagem: str = None):
     if mensagem is None:
         mensagem = (
             f"Olá {nome or 'tudo bem'}! 👋\n\n"
-            f"Aqui é a Julia da FLC Bank. Tentei te ligar agora mas não consegui falar com você.\n\n"
+            f"Aqui é a {IA_NAME} da {EMPRESA_NOME}. Tentei te ligar agora mas não consegui falar com você.\n\n"
             f"Temos condições especiais de crédito com acesso a mais de 60 instituições financeiras. "
             f"Quando tiver um momento, me responda aqui e posso te apresentar as opções! 😊"
         )
@@ -48,7 +52,7 @@ def enviar_agendamento_whatsapp(phone: str, nome: str, mensagem: str = None):
     numero = _formatar_numero(phone)
     if mensagem is None:
         mensagem = (
-            f"Olá {nome or ''}! 😊 Aqui é a Julia da FLC Bank.\n\n"
+            f"Olá {nome or ''}! 😊 Aqui é a {IA_NAME} da {EMPRESA_NOME}.\n\n"
             f"Foi um prazer falar com você! Para agendarmos sua reunião com um especialista, "
             f"qual dia e horário fica melhor para você?\n\n"
             f"Pode me dizer o dia e a hora que prefere! 📅"
@@ -63,14 +67,14 @@ def enviar_confirmacao_agendamento(phone: str, nome: str, horario: str, link_mee
             f"Olá {nome or ''}! 😊\n\n"
             f"Sua reunião foi agendada para {horario}.\n\n"
             f"🎥 Link da reunião:\n{link_meet}\n\n"
-            f"Um especialista da FLC Bank estará te esperando. Qualquer dúvida é só responder aqui!\n\n"
+            f"Um especialista da {EMPRESA_NOME} estará te esperando. Qualquer dúvida é só responder aqui!\n\n"
             f"Até logo! 👋"
         )
     else:
         mensagem = (
             f"Olá {nome or ''}! 😊\n\n"
             f"Sua reunião foi agendada para {horario}.\n\n"
-            f"📞 Um especialista da FLC Bank vai te ligar no horário combinado. "
+            f"📞 Um especialista da {EMPRESA_NOME} vai te ligar no horário combinado. "
             f"Qualquer dúvida é só responder aqui!\n\n"
             f"Até logo! 👋"
         )

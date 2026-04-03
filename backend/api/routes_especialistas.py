@@ -16,6 +16,9 @@ from db.database import (
 router = APIRouter()
 BRT = timezone(timedelta(hours=-3))
 
+# Variáveis de configuração da IA
+IA_NAME = os.getenv("IA_NAME", "Julia")
+
 
 # ── Schemas ───────────────────────────────────────────────────────────────────
 
@@ -334,7 +337,7 @@ def transferir_entre_especialistas(dados: TransferirEntrePayload, db: Session = 
 
 @router.post("/encerrar")
 def encerrar_atendimento(dados: EncerrarPayload, db: Session = Depends(get_db)):
-    """Especialista encerra atendimento — Julia volta a responder"""
+    """Especialista encerra atendimento — IA volta a responder"""
     lead = db.get(Lead, dados.lead_id)
     if not lead:
         return {"erro": "Lead não encontrado"}
@@ -351,7 +354,7 @@ def encerrar_atendimento(dados: EncerrarPayload, db: Session = Depends(get_db)):
         wpp_msg = WppMensagem(lead_id=lead.id, role="assistant", content=msg)
         db.add(wpp_msg)
 
-    # Reativa Julia
+    # Reativa IA
     lead.ia_pausada = False
     lead.especialista_id = ""
 
@@ -370,8 +373,8 @@ def encerrar_atendimento(dados: EncerrarPayload, db: Session = Depends(get_db)):
         esp.atendimentos_ativos = max(0, (esp.atendimentos_ativos or 0) - 1)
 
     db.commit()
-    print(f"✅ Atendimento encerrado: {lead.name} — Julia reativada")
-    return {"mensagem": "Atendimento encerrado, Julia reativada"}
+    print(f"✅ Atendimento encerrado: {lead.name} — {IA_NAME} reativada")
+    return {"mensagem": f"Atendimento encerrado, {IA_NAME} reativada"}
 
 
 # ── PAINEL DO ESPECIALISTA ────────────────────────────────────────────────────

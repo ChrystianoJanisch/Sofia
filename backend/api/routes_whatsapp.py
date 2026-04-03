@@ -8,6 +8,10 @@ from datetime import datetime
 
 router = APIRouter()
 
+# Variáveis de configuração da IA
+IA_NAME = os.getenv("IA_NAME", "Julia")
+EMPRESA_NOME = os.getenv("EMPRESA_NOME", "FLC Bank")
+
 
 def _normalizar_numero(numero: str) -> str:
     """
@@ -115,7 +119,7 @@ def _get_estado(lead, db: Session) -> dict:
              .all()
 
     # Filtra mensagens de "system" — são notas internas (contexto da ligação)
-    # A IA vai receber isso separadamente via _sofia_ia
+    # A IA vai receber isso separadamente via _gerar_resposta_ia
     historico = [
         {"role": m.role, "content": m.content}
         for m in msgs
@@ -195,7 +199,7 @@ def _save_estado(lead, estado: dict, db: Session):
 def _responder(numero: str, conteudo: str, lead_id: str, estado: dict, db: Session):
     """
     Envia mensagem WhatsApp, salva no banco e atualiza histórico em memória.
-    Único ponto de saída — garante que TUDO que a Sofia envia fica registrado.
+    Único ponto de saída — garante que TUDO que a IA envia fica registrado.
     """
     _enviar(numero, conteudo)
     _salvar_msg(lead_id, "assistant", conteudo, db)
@@ -558,18 +562,17 @@ def _proximos_horarios_livres(data_hora_str: str, db: Session, quantidade: int =
     return livres
 
 
-# ── SOFIA IA ─────────────────────────────────────────────────────────────────
+# ── IA PRINCIPAL ─────────────────────────────────────────────────────────────────
 
 # Carrega base de conhecimento dos arquivos .txt em prompts/
 from prompts.loader import carregar_conhecimento
 
 # Regras específicas do WhatsApp (não existem nos .txt porque são do canal)
-SOFIA_WPP_REGRAS = """
+WPP_REGRAS = f"""
 IDENTIDADE OBRIGATÓRIA:
-- Seu nome é Julia (NÃO Sofia, NÃO outro nome)
-- Você é consultora da FLC Bank
-- SEMPRE se apresente como "Julia da FLC Bank"
-- NUNCA use o nome Sofia em nenhuma circunstância
+- Seu nome é {IA_NAME}
+- Você é consultora da {EMPRESA_NOME}
+- SEMPRE se apresente como "{IA_NAME} da {EMPRESA_NOME}"
 
 REGRAS DO WHATSAPP (específicas deste canal):
 - Use no máximo 1 emoji por mensagem
@@ -578,7 +581,7 @@ REGRAS DO WHATSAPP (específicas deste canal):
 
 FILOSOFIA: EXPLIQUE PRIMEIRO, AGENDE DEPOIS
 - Quando o cliente não atendeu a ligação e respondeu no WhatsApp, ele quer ENTENDER.
-- Primeiro explique como a FLC Bank funciona, tire dúvidas, responda sobre produtos.
+- Primeiro explique como a {EMPRESA_NOME} funciona, tire dúvidas, responda sobre produtos.
 - Só sugira reunião com especialista quando o cliente DEMONSTRAR INTERESSE em avançar.
 - Se o cliente disser "sim" a "Posso te explicar?", EXPLIQUE — não pule pro agendamento.
 
@@ -607,7 +610,7 @@ Você não sabe quem é. Seja acolhedora. Entenda o que ele precisa.
 Separe a trilha cedo: "Hoje você busca algo para empresa ou para pessoa física?"
 """
 
-def _get_sofia_system() -> str:
+def _get_ia_system() -> str:
     """Monta o system prompt completo: base de conhecimento + regras do WhatsApp + dados institucionais."""
     from integrations.whatsapp import DADOS_INSTITUCIONAIS
     
@@ -625,10 +628,10 @@ def _get_sofia_system() -> str:
         inst += f"Instagram: {d['instagram']}\n"
     inst += "REGRA: NUNCA invente dados institucionais. Use APENAS os dados acima."
     
-    return base + "\n\n" + SOFIA_WPP_REGRAS + inst
+    return base + "\n\n" + WPP_REGRAS + inst
 
 
-def _sofia_ia(historico: list, ctx: str = "", lead=None) -> str:
+def _gerar_resposta_ia(historico: list, ctx: str = "", lead=None) -> str:
     from openai import OpenAI
     client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
@@ -671,7 +674,7 @@ def _sofia_ia(historico: list, ctx: str = "", lead=None) -> str:
                 + "\n".join(partes)
             )
 
-    system = _get_sofia_system()
+    system = _get_ia_system()
     if memoria:
         system += f"\n\n{memoria}"
     if ctx:
@@ -1103,13 +1106,13 @@ async def _processar(texto: str, numero: str, lead, estado: dict, db):
     # ─────────────────────────────────────────────────────────────────────────
     if etapa == "aguardando_nome":
         if len(estado["historico"]) == 1:
-            msg_sofia = (
-                "Olá! 👋 Aqui é a Julia da FLC Bank. "
+            msg_ia = (
+                f"Olá! 👋 Aqui é a {IA_NAME} da {EMPRESA_NOME}. "
                 "Com quem tenho o prazer de falar?"
             )
-            _salvar_msg(lead.id, "assistant", msg_sofia, db)
-            estado["historico"].insert(0, {"role": "assistant", "content": msg_sofia})
-            _enviar(numero, msg_sofia)
+            _salvar_msg(lead.id, "assistant", msg_ia, db)
+            estado["historico"].insert(0, {"role": "assistant", "content": msg_ia})
+            _enviar(numero, msg_ia)
             _save_estado(lead, estado, db)
             return
         else:
@@ -1129,7 +1132,7 @@ async def _processar(texto: str, numero: str, lead, estado: dict, db):
             # Se extração retornou vazio = pessoa mandou uma frase, não um nome
             # Responde à frase COM pedido de nome
             if not nome_extraido or len(nome_extraido) <= 2:
-                resp = _sofia_ia(
+                resp = _gerar_resposta_ia(
                     estado["historico"],
                     "O cliente respondeu algo que NÃO é um nome. "
                     "Ele pode ter feito uma pergunta ou comentário. "
@@ -1161,10 +1164,10 @@ async def _processar(texto: str, numero: str, lead, estado: dict, db):
             etapa = "conversa"
             db.commit()
             print(f"📝 Nome capturado: '{texto}' → '{nome_final}'")
-            resp = _sofia_ia(
+            resp = _gerar_resposta_ia(
                 estado["historico"],
                 f"O cliente disse que se chama {nome_final}. "
-                "Cumprimente-o pelo nome, apresente-se como Julia da FLC Bank "
+                f"Cumprimente-o pelo nome, apresente-se como {IA_NAME} da {EMPRESA_NOME} "
                 "e pergunte o que ele precisa. Máximo 2 frases.",
                 lead=lead
             )
@@ -1192,7 +1195,7 @@ async def _processar(texto: str, numero: str, lead, estado: dict, db):
                 saudacao = (f"Olá {nome}! 😊 " if nome else "Olá! 😊 ")
                 msg_ab = (
                     saudacao +
-                    "Aqui é a Julia da FLC Bank. "
+                    f"Aqui é a {IA_NAME} da {EMPRESA_NOME}. "
                     "Foi ótimo conversar com você! 😊\n\n"
                     "Vamos prosseguir para o agendamento ou ficou com alguma dúvida sobre o que conversamos? "
                     "Pode me perguntar aqui que eu te ajudo!"
@@ -1214,7 +1217,7 @@ async def _processar(texto: str, numero: str, lead, estado: dict, db):
                 saudacao = (f"Olá {nome}! 👋 " if nome else "Olá! 👋 ")
                 msg_ab = (
                     saudacao +
-                    "Aqui é a Julia da FLC Bank. "
+                    f"Aqui é a {IA_NAME} da {EMPRESA_NOME}. "
                     "Tentei te ligar agora mas não consegui falar com você. "
                     "Liguei porque a gente é especializada em crédito para negativados e reestruturação financeira de empresas — "
                     "trabalhamos com mais de 60 instituições e conseguimos opções que banco tradicional não oferece. "
@@ -1234,7 +1237,7 @@ async def _processar(texto: str, numero: str, lead, estado: dict, db):
             saudacao = (f"Olá {nome}! 👋 " if nome else "Olá! 👋 ")
             msg_ab = (
                 saudacao +
-                "Aqui é a Julia da FLC Bank. "
+                f"Aqui é a {IA_NAME} da {EMPRESA_NOME}. "
                 f"Sua reunião está confirmada{info}. "
                 "Posso te ajudar com mais alguma coisa?"
             )
@@ -1253,7 +1256,7 @@ async def _processar(texto: str, numero: str, lead, estado: dict, db):
                 saudacao = (f"Oi {nome}! 😊 " if nome else "Oi! 😊 ")
                 msg_ab = (
                     saudacao +
-                    "Aqui é a Julia da FLC Bank. "
+                    f"Aqui é a {IA_NAME} da {EMPRESA_NOME}. "
                     f"Conforme combinamos, tenho uma ligação marcada pra você às {hora_cb}.\n\n"
                     "Se quiser mudar o horário, é só me falar aqui! "
                     "Ou se preferir, podemos conversar por aqui mesmo pelo WhatsApp. 💬"
@@ -1262,7 +1265,7 @@ async def _processar(texto: str, numero: str, lead, estado: dict, db):
                 saudacao = (f"Oi {nome}! 😊 " if nome else "Oi! 😊 ")
                 msg_ab = (
                     saudacao +
-                    "Aqui é a Julia da FLC Bank. "
+                    f"Aqui é a {IA_NAME} da {EMPRESA_NOME}. "
                     "Como posso te ajudar? 😊"
                 )
             estado["historico"].insert(-1, {"role": "assistant", "content": msg_ab})
@@ -1275,7 +1278,7 @@ async def _processar(texto: str, numero: str, lead, estado: dict, db):
             saudacao = (f"Olá {nome}! 👋 " if nome else "Olá! 👋 ")
             msg_ab = (
                 saudacao +
-                "Aqui é a Julia da FLC Bank. "
+                f"Aqui é a {IA_NAME} da {EMPRESA_NOME}. "
                 "A gente ajuda clientes que precisam de crédito, inclusive negativados, "
                 "além de atuar com créditos para empresas e para pessoas físicas. "
                 "Me conta o que você precisa? 😊"
@@ -1309,7 +1312,7 @@ async def _processar(texto: str, numero: str, lead, estado: dict, db):
         if nao_quer:
             lead.stage = "sem_interesse"
             db.commit()
-            resp = _sofia_ia(
+            resp = _gerar_resposta_ia(
                 estado["historico"],
                 "Cliente não tem interesse. Agradeça por ter respondido. "
                 "Diga que fica à disposição caso mude de ideia. 1 frase só.",
@@ -1355,7 +1358,7 @@ async def _processar(texto: str, numero: str, lead, estado: dict, db):
                 "Máximo 2 frases."
             )
 
-        resp = _sofia_ia(estado["historico"], ctx, lead=lead)
+        resp = _gerar_resposta_ia(estado["historico"], ctx, lead=lead)
         _responder(numero, resp, lead.id, estado, db)
 
         if user_msgs_count >= 5:
@@ -1408,7 +1411,7 @@ async def _processar(texto: str, numero: str, lead, estado: dict, db):
                     "Quando ele demonstrar interesse novamente, você pode sugerir suavemente. "
                     "Máximo 2 frases."
                 )
-                resp = _sofia_ia(estado["historico"], ctx, lead=lead)
+                resp = _gerar_resposta_ia(estado["historico"], ctx, lead=lead)
                 _responder(numero, resp, lead.id, estado, db)
                 _save_estado(lead, estado, db)
                 return
@@ -1457,7 +1460,7 @@ async def _processar(texto: str, numero: str, lead, estado: dict, db):
                     "Ao final, conduza suavemente para agendar quando ele estiver pronto. "
                     "Máximo 2 frases."
                 )
-                resp = _sofia_ia(estado["historico"], ctx, lead=lead)
+                resp = _gerar_resposta_ia(estado["historico"], ctx, lead=lead)
                 _responder(numero, resp, lead.id, estado, db)
             else:
                 # ✅ CORREÇÃO: Não fica em loop repetindo menu.
@@ -1471,7 +1474,7 @@ async def _processar(texto: str, numero: str, lead, estado: dict, db):
                     "Se ele quiser agendar depois, ele vai pedir. "
                     "Máximo 2 frases."
                 )
-                resp = _sofia_ia(estado["historico"], ctx, lead=lead)
+                resp = _gerar_resposta_ia(estado["historico"], ctx, lead=lead)
                 _responder(numero, resp, lead.id, estado, db)
         _save_estado(lead, estado, db)
         return
@@ -1709,7 +1712,7 @@ async def _processar(texto: str, numero: str, lead, estado: dict, db):
 
             if _horario_ocupado(data_hora, db):
                 estado["etapa"] = "aguardando_dia"
-                resp = _sofia_ia(estado["historico"], "Horário ocupado. Peça outro dia.", lead=lead)
+                resp = _gerar_resposta_ia(estado["historico"], "Horário ocupado. Peça outro dia.", lead=lead)
                 _responder(numero, resp, lead.id, estado, db)
                 _save_estado(lead, estado, db)
                 return
@@ -2121,20 +2124,20 @@ async def _processar(texto: str, numero: str, lead, estado: dict, db):
         "falar com especialista", "falar com humano", "falar com atendente",
     ])
 
-    # Verifica se a Sofia perguntou sobre agendar e o cliente confirmou
-    ultima_sofia = ""
+    # Verifica se a IA perguntou sobre agendar e o cliente confirmou
+    ultima_ia = ""
     for m in reversed(estado["historico"]):
         if m["role"] == "assistant":
-            ultima_sofia = m["content"].lower()
+            ultima_ia = m["content"].lower()
             break
 
-    sofia_perguntou_agendar = any(w in ultima_sofia for w in [
+    ia_perguntou_agendar = any(w in ultima_ia for w in [
         "agendar", "marcar", "reunião", "reuniao", "especialista",
         "conversa rápida", "conversa rapida", "quer marcar", "posso marcar",
         "bate-papo", "vídeo ou ligação", "video ou ligacao",
     ])
 
-    # "sim" genérico só vale se Sofia REALMENTE perguntou sobre agendar
+    # "sim" genérico só vale se a IA REALMENTE perguntou sobre agendar
     # E a mensagem inteira é curta (não é "sim mas quero outro assunto")
     cliente_disse_sim = (
         len(t_lower.strip()) < 20 and
@@ -2154,7 +2157,7 @@ async def _processar(texto: str, numero: str, lead, estado: dict, db):
         cliente_disse_sim = False
         # NÃO cancela quer_agendar — "quero agendar, não por telefone" é válido
 
-    if quer_agendar or (sofia_perguntou_agendar and cliente_disse_sim):
+    if quer_agendar or (ia_perguntou_agendar and cliente_disse_sim):
         estado["etapa"] = "aguardando_tipo"
         _enviar_selecao_tipo(numero, lead.id, estado, db,
             msg_intro="Que bom! 😊 Como prefere a reunião?")
@@ -2200,7 +2203,7 @@ async def _processar(texto: str, numero: str, lead, estado: dict, db):
             "NUNCA diga 'vou agendar' ou marque dia/hora. Máximo 2 frases."
         )
 
-    resp = _sofia_ia(estado["historico"], ctx, lead=lead)
+    resp = _gerar_resposta_ia(estado["historico"], ctx, lead=lead)
 
     # ✅ INTERCEPTOR: Se a IA LITERALMENTE agendou (inventou data/hora),
     # descarta a resposta e envia uma genérica.
@@ -2215,7 +2218,7 @@ async def _processar(texto: str, numero: str, lead, estado: dict, db):
 
     if ia_inventou_horario:
         print(f"🚫 IA inventou horário: '{resp[:80]}' → descartando")
-        resp = _sofia_ia(estado["historico"],
+        resp = _gerar_resposta_ia(estado["historico"],
             "ATENÇÃO: Você acabou de inventar um horário de reunião. Isso é PROIBIDO. "
             "Responda a última mensagem do cliente de forma natural. "
             "NÃO mencione dia, hora, agendamento ou reunião. "

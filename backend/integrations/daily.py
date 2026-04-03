@@ -5,6 +5,9 @@ DAILY_API_KEY  = os.getenv("DAILY_API_KEY", "")
 DAILY_BASE_URL = "https://api.daily.co/v1"
 BASE_URL       = os.getenv("WEBHOOK_BASE_URL", "https://reuniao.flcbank.com.br")
 
+# Variáveis de configuração
+SALA_PREFIX = os.getenv("SALA_PREFIX", "flcbank")
+
 HEADERS = {
     "Authorization": f"Bearer {DAILY_API_KEY}",
     "Content-Type": "application/json"
@@ -194,4 +197,4 @@ def _gerar_slug(nome: str, data_hora_str: str) -> str:
     except:
         sufixo = datetime.now().strftime("%Y%m%d-%Hh")
     uid = str(uuid.uuid4())[:6]
-    return f"flcbank-{nome_limpo}-{sufixo}-{uid}"
+    return f"{SALA_PREFIX}-{nome_limpo}-{sufixo}-{uid}"

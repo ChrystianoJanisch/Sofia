@@ -8,7 +8,7 @@ def carregar_conhecimento() -> str:
     Resultado é cacheado em memória — só lê do disco uma vez.
     
     Usado por:
-    - routes_whatsapp.py → _sofia_ia() → system prompt
+    - routes_whatsapp.py → _gerar_resposta_ia() → system prompt
     - Pode ser copiado pro ElevenLabs como base de conhecimento
     """
     global _cache

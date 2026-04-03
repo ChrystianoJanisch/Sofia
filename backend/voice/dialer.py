@@ -20,7 +20,7 @@ def _saudacao_horario() -> str:
         return "Boa noite"
 
 
-def fazer_ligacao(phone: str, nome: str = "") -> str:
+def fazer_ligacao(phone: str, nome: str = "", empresa: str = "", cnpj: str = "") -> str:
     numero = formatar_telefone(phone)
 
     # Log das variáveis de ambiente (sem expor a key inteira)
@@ -49,6 +49,8 @@ def fazer_ligacao(phone: str, nome: str = "") -> str:
         "conversation_initiation_client_data": {
             "dynamic_variables": {
                 "nome_cliente": nome or "cliente",
+                "empresa":      empresa or "",
+                "cnpj":         cnpj or "",
                 "saudacao":     _saudacao_horario()
             }
         }

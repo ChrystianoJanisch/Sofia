@@ -9,7 +9,20 @@
       "Bash(mkdir -p \"c:/Users/janis/Dev/ia-prospeccao/cliente-flc/nami-ia\")",
       "Read(//c/Users/janis/Dev/ia-prospeccao/cliente-flc/**)",
       "Bash(git rm:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git stash:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\janis\\Dev\\ia-prospeccao\\cliente-flc\\rs-company\\backend\\db",
+      "C:\\Users\\janis\\Dev\\ia-prospeccao\\cliente-flc\\rs-company\\backend\\api",
+      "C:\\Users\\janis\\Dev\\ia-prospeccao\\cliente-flc\\rs-company\\backend\\static",
+      "C:\\Users\\janis\\Dev\\ia-prospeccao\\cliente-flc\\rs-company\\backend\\voice",
+      "C:\\Users\\janis\\Dev\\ia-prospeccao\\cliente-flc\\nami-ia\\backend\\db",
+      "C:\\Users\\janis\\Dev\\ia-prospeccao\\cliente-flc\\nami-ia\\backend\\api",
+      "C:\\Users\\janis\\Dev\\ia-prospeccao\\cliente-flc\\nami-ia\\backend\\static",
+      "C:\\Users\\janis\\Dev\\ia-prospeccao\\cliente-flc\\nami-ia\\backend\\voice"
     ]
   }
 }

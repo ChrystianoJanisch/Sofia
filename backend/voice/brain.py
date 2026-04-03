@@ -5,10 +5,13 @@ import os, json, re
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
+# Variáveis de configuração da IA
+IA_NAME = os.getenv("IA_NAME", "Julia")
+
 
 def classificar_lead(historico: list) -> dict:
     conversa = "\n".join([
-        f"{'CLIENTE' if m['role'] == 'user' else 'JULIA'}: {m['content']}"
+        f"{'CLIENTE' if m['role'] == 'user' else IA_NAME.upper()}: {m['content']}"
         for m in historico
     ])
 
