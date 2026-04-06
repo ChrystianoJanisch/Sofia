@@ -1439,11 +1439,60 @@ async def _processar(texto: str, numero: str, lead, estado: dict, db):
             _enviar_selecao_dia(numero, lead.id, estado, db,
                 msg_intro="Perfeito, será por ligação! 📞\n\nEscolha o melhor dia:")
         elif is_whatsapp:
-            estado["quer_meet"] = False
-            estado["tipo_reuniao"] = "whatsapp"
-            estado["etapa"] = "aguardando_dia"
-            _enviar_selecao_dia(numero, lead.id, estado, db,
-                msg_intro="Perfeito, será por WhatsApp! 💬\n\nEscolha o melhor dia:")
+            # WhatsApp → encaminha direto pra especialista (igual transferência)
+            from db.database import Especialista, Transferencia
+
+            contexto_analise = (
+                f"{lead.resumo or ''} {lead.product or ''} "
+                f"{' '.join([h.get('content','') for h in estado.get('historico',[])[-5:]])}"
+            ).lower()
+
+            area_detectada = "geral"
+            palavras_credito = ["crédito","credito","empréstimo","emprestimo","financiamento","capital de giro","antecipação","antecipacao","recebíveis","recebiveis","taxa","juros","parcela","home equity","imóvel","imovel","garantia"]
+            palavras_reestruturacao = ["reestruturação","reestruturacao","dívida","divida","renegociar","renegociação","renegociacao","negativado","nome sujo","serasa","spc","recuperação","recuperacao","falência","falencia","endividado","passivo","credores"]
+            score_credito = sum(1 for p in palavras_credito if p in contexto_analise)
+            score_reestruturacao = sum(1 for p in palavras_reestruturacao if p in contexto_analise)
+            if score_reestruturacao > score_credito and score_reestruturacao > 0:
+                area_detectada = "reestruturacao"
+            elif score_credito > 0:
+                area_detectada = "credito"
+
+            esp = db.query(Especialista).filter(Especialista.ativo == True, Especialista.area == area_detectada).order_by(Especialista.atendimentos_ativos.asc()).first()
+            if not esp and area_detectada != "geral":
+                esp = db.query(Especialista).filter(Especialista.ativo == True, Especialista.area == "geral").order_by(Especialista.atendimentos_ativos.asc()).first()
+            if not esp:
+                esp = db.query(Especialista).filter(Especialista.ativo == True).order_by(Especialista.atendimentos_ativos.asc()).first()
+
+            if esp:
+                lead.ia_pausada = True
+                lead.especialista_id = esp.id
+                lead.wpp_etapa = "aguardando_especialista"
+                contexto = f"Nome: {lead.name or '—'}\nTelefone: {lead.phone}\nEmpresa: {getattr(lead, 'company', '') or '—'}\nProduto: {lead.product or '—'}\nValor: {lead.desired_value or '—'}\nTemperatura: {lead.temperature or '—'}\nResumo: {lead.resumo or '—'}"
+                transf = Transferencia(lead_id=lead.id, especialista_id=esp.id, motivo="Cliente escolheu atendimento por WhatsApp", contexto=contexto)
+                db.add(transf)
+                esp.atendimentos_ativos = (esp.atendimentos_ativos or 0) + 1
+                _responder(numero,
+                    "Perfeito, será por WhatsApp! 💬\n\n"
+                    "Vou te passar agora para o profissional mais indicado pra te ajudar. "
+                    "Ele já tem todo o contexto da nossa conversa, aguarda só um momentinho! 😊",
+                    lead.id, estado, db)
+                if esp.whatsapp:
+                    try:
+                        notif = (f"🔔 Novo atendimento via WhatsApp!\n\nCliente: {lead.name or '—'}\nTelefone: {lead.phone}\nProduto: {lead.product or '—'}\nResumo: {lead.resumo or '—'}\n\nAcesse o painel pra responder:\n{os.getenv('WEBHOOK_BASE_URL', '')}/painel-especialista")
+                        _enviar(esp.whatsapp, notif)
+                    except Exception as e:
+                        print(f"⚠️ Erro ao notificar especialista: {e}")
+                estado["etapa"] = "concluido"
+                print(f"💬 {lead.name} escolheu WhatsApp → transferido para {esp.nome}")
+            else:
+                _responder(numero,
+                    "No momento nossos especialistas estão ocupados. "
+                    "Vou anotar aqui e assim que um estiver disponível, ele vai entrar em contato pelo WhatsApp! 😊",
+                    lead.id, estado, db)
+                lead.ia_pausada = True
+                lead.wpp_etapa = "aguardando_especialista"
+                estado["etapa"] = "concluido"
+                print(f"⚠️ {lead.name} escolheu WhatsApp mas nenhum especialista disponível")
         else:
             quer_explicacao = any(w in t for w in [
                 "explicar", "explica", "como funciona", "o que é", "o que vocês",
