@@ -774,7 +774,7 @@
         // Auth & Token Management
         // ======================
         function getAuthToken() {
-            const token = localStorage.getItem('authToken');
+            const token = localStorage.getItem('sofia_token');
             if (!token) {
                 window.location.href = '/login';
                 return null;
