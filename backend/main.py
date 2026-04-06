@@ -20,6 +20,7 @@ from api.routes_meetings import router as meetings_router
 from api.routes_auth import router as auth_router          # ← AUTH
 from api.routes_especialistas import router as esp_router   # ← ESPECIALISTAS
 from api.routes_daily_webhook import router as daily_webhook_router
+from api.routes_analytics import router as analytics_router
 
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 os.makedirs(STATIC_DIR, exist_ok=True)
@@ -45,6 +46,7 @@ app.include_router(meetings_router, prefix="/reuniao",      tags=["Reuniões"])
 app.include_router(auth_router,     prefix="/api/auth",     tags=["Auth"])  # ← AUTH
 app.include_router(esp_router,      prefix="/api/especialistas", tags=["Especialistas"])
 app.include_router(daily_webhook_router, prefix="/api/daily", tags=["Daily.co"])
+app.include_router(analytics_router, prefix="/api/analytics", tags=["Analytics"])
 
 
 @app.on_event("startup")
@@ -54,7 +56,7 @@ async def startup():
     import asyncio
     asyncio.create_task(executar_callbacks())
     asyncio.create_task(executar_followups())
-    print("🚀 Julia v6.2 — Auth + Agenda + WhatsApp + Callbacks + Gravação — Pronta!")
+    print("🚀 Sofia v6.2 — Auth + Agenda + WhatsApp + Callbacks + Analytics — Pronta!")
 
 
 @app.get("/")
@@ -75,6 +77,11 @@ def login_page():
 @app.get("/dashboard")
 def dashboard():
     return FileResponse(os.path.join(STATIC_DIR, "dashboard.html"))
+
+
+@app.get("/analytics")
+def analytics_page():
+    return FileResponse(os.path.join(STATIC_DIR, "analytics.html"))
 
 
 @app.get("/painel-especialista")

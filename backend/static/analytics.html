@@ -1,0 +1,1150 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Analytics — Painel Sofia</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600;700&family=DM+Sans:wght@300;400;500&display=swap"
+        rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --gold: #c8a951;
+            --gold-light: #d4b96a;
+            --gold-dim: rgba(200, 169, 81, 0.1);
+            --gold-border: rgba(200, 169, 81, 0.18);
+            --black: #000;
+            --black-2: #0a0a0a;
+            --black-3: #111;
+            --white: #fff;
+            --gray: #909090;
+            --gray-dim: #444;
+            --green: #4ade80;
+            --red: #f87171;
+            --blue: #60a5fa;
+            --orange: #f59e0b
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box
+        }
+
+        html, body {
+            width: 100%;
+            height: 100%
+        }
+
+        body {
+            font-family: 'DM Sans', sans-serif;
+            background: var(--black);
+            color: var(--white);
+            min-height: 100vh;
+            -webkit-text-size-adjust: 100%
+        }
+
+        .top-line {
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--gold), transparent);
+            position: sticky;
+            top: 0;
+            z-index: 100
+        }
+
+        .topbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 16px;
+            background: var(--black-2);
+            border-bottom: 1px solid var(--gold-border);
+            position: sticky;
+            top: 1px;
+            z-index: 99;
+            flex-wrap: wrap;
+            gap: 8px
+        }
+
+        .topbar-left {
+            display: flex;
+            align-items: center;
+            gap: 12px
+        }
+
+        .back-link {
+            color: var(--gold);
+            text-decoration: none;
+            font-size: 11px;
+            letter-spacing: 1px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: color .2s
+        }
+
+        .back-link:hover {
+            color: var(--gold-light)
+        }
+
+        .page-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--white)
+        }
+
+        .topbar-right {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 10px;
+            color: var(--gray)
+        }
+
+        .last-update {
+            font-size: 9px;
+            color: var(--gray-dim)
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px 16px
+        }
+
+        .overview-cards {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 1px;
+            background: var(--gold-border);
+            border: 1px solid var(--gold-border);
+            margin-bottom: 24px
+        }
+
+        .card {
+            background: var(--black);
+            padding: 16px;
+            transition: all .2s;
+            cursor: pointer;
+            border: none
+        }
+
+        .card:hover {
+            background: var(--black-3)
+        }
+
+        .card-label {
+            font-size: 7px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            color: var(--gold);
+            margin-bottom: 8px;
+            font-weight: 500
+        }
+
+        .card-value {
+            font-family: 'Cormorant Garamond', serif;
+            font-size: 32px;
+            font-weight: 700;
+            color: var(--white);
+            line-height: 1;
+            margin-bottom: 4px
+        }
+
+        .card-subtitle {
+            font-size: 10px;
+            color: var(--gray);
+            line-height: 1.4
+        }
+
+        .charts-section {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1px;
+            background: var(--gold-border);
+            border: 1px solid var(--gold-border);
+            margin-bottom: 24px
+        }
+
+        @media (max-width: 768px) {
+            .charts-section {
+                grid-template-columns: 1fr
+            }
+        }
+
+        .chart-box {
+            background: var(--black);
+            padding: 16px;
+            position: relative;
+            overflow: hidden
+        }
+
+        .chart-label {
+            font-size: 8px;
+            letter-spacing: 3px;
+            text-transform: uppercase;
+            color: var(--gray-dim);
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 12px
+        }
+
+        .chart-label::after {
+            content: '';
+            flex: 1;
+            height: 1px;
+            background: var(--gold-border)
+        }
+
+        .chart-container {
+            position: relative;
+            height: 300px
+        }
+
+        .insights-section {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1px;
+            background: var(--gold-border);
+            border: 1px solid var(--gold-border);
+            margin-bottom: 24px
+        }
+
+        @media (max-width: 768px) {
+            .insights-section {
+                grid-template-columns: 1fr
+            }
+        }
+
+        .insights-box, .ab-tests-box {
+            background: var(--black);
+            padding: 16px
+        }
+
+        .summary-card {
+            background: var(--black-3);
+            border: 1px solid var(--gold-border);
+            padding: 12px;
+            margin-bottom: 12px
+        }
+
+        .summary-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+            font-size: 12px
+        }
+
+        .summary-item:last-child {
+            margin-bottom: 0
+        }
+
+        .summary-label {
+            color: var(--gray);
+            font-size: 11px
+        }
+
+        .summary-value {
+            color: var(--gold);
+            font-weight: 600;
+            font-size: 12px
+        }
+
+        .insights-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            max-height: 500px;
+            overflow-y: auto;
+            padding-right: 4px
+        }
+
+        .insights-list::-webkit-scrollbar {
+            width: 4px
+        }
+
+        .insights-list::-webkit-scrollbar-track {
+            background: transparent
+        }
+
+        .insights-list::-webkit-scrollbar-thumb {
+            background: var(--gold-border);
+            border-radius: 2px
+        }
+
+        .insight-item {
+            background: var(--black-3);
+            border: 1px solid var(--gold-border);
+            padding: 10px;
+            font-size: 11px;
+            line-height: 1.5
+        }
+
+        .insight-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 6px;
+            gap: 8px
+        }
+
+        .insight-type {
+            font-size: 7px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            padding: 2px 6px;
+            border: 1px solid;
+            font-weight: 600
+        }
+
+        .insight-type.worked {
+            color: var(--green);
+            border-color: rgba(74, 222, 128, .3)
+        }
+
+        .insight-type.failed {
+            color: var(--red);
+            border-color: rgba(248, 113, 113, .3)
+        }
+
+        .insight-type.suggestion {
+            color: var(--blue);
+            border-color: rgba(96, 165, 250, .3)
+        }
+
+        .insight-text {
+            color: var(--white);
+            margin-bottom: 4px
+        }
+
+        .insight-desc {
+            color: var(--gray);
+            font-size: 10px
+        }
+
+        .ab-tests-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            max-height: 500px;
+            overflow-y: auto;
+            padding-right: 4px
+        }
+
+        .ab-tests-list::-webkit-scrollbar {
+            width: 4px
+        }
+
+        .ab-tests-list::-webkit-scrollbar-track {
+            background: transparent
+        }
+
+        .ab-tests-list::-webkit-scrollbar-thumb {
+            background: var(--gold-border);
+            border-radius: 2px
+        }
+
+        .ab-test-item {
+            background: var(--black-3);
+            border: 1px solid var(--gold-border);
+            padding: 12px
+        }
+
+        .ab-test-name {
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: var(--white);
+            font-size: 12px
+        }
+
+        .ab-test-description {
+            font-size: 10px;
+            color: var(--gray);
+            margin-bottom: 8px;
+            line-height: 1.4
+        }
+
+        .ab-test-variants {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 8px
+        }
+
+        .ab-variant {
+            flex: 1;
+            background: var(--black);
+            border: 1px solid var(--gold-border);
+            padding: 8px;
+            font-size: 10px
+        }
+
+        .ab-variant-name {
+            color: var(--gold);
+            font-weight: 600;
+            margin-bottom: 4px
+        }
+
+        .ab-variant-rate {
+            color: var(--white);
+            font-size: 14px;
+            font-weight: 700
+        }
+
+        .ab-test-winner {
+            background: rgba(200, 169, 81, 0.08);
+            border: 1px solid rgba(200, 169, 81, 0.3);
+            padding: 6px;
+            font-size: 9px;
+            color: var(--gold);
+            text-align: center;
+            margin-top: 8px;
+            font-weight: 600
+        }
+
+        .ab-test-confidence {
+            font-size: 9px;
+            color: var(--gray-dim);
+            margin-top: 6px
+        }
+
+        .btn {
+            padding: 8px 14px;
+            font-size: 9px;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            cursor: pointer;
+            border: none;
+            font-family: 'DM Sans', sans-serif;
+            font-weight: 500;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            transition: all .2s;
+            white-space: nowrap
+        }
+
+        .btn-gold {
+            background: var(--gold);
+            color: var(--black)
+        }
+
+        .btn-gold:hover {
+            background: var(--gold-light)
+        }
+
+        .btn-outline {
+            background: transparent;
+            color: var(--gray);
+            border: 1px solid var(--gold-border)
+        }
+
+        .btn-outline:hover {
+            color: var(--gold);
+            border-color: var(--gold)
+        }
+
+        .btn-new-test {
+            width: 100%;
+            margin-top: 12px
+        }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: var(--gray)
+        }
+
+        .error-msg {
+            background: rgba(248, 113, 113, 0.08);
+            border: 1px solid rgba(248, 113, 113, .3);
+            color: var(--red);
+            padding: 12px;
+            margin-bottom: 16px;
+            font-size: 12px
+        }
+
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, .85);
+            backdrop-filter: blur(4px);
+            z-index: 200;
+            align-items: center;
+            justify-content: center;
+            overflow-y: auto;
+            padding: 20px 12px
+        }
+
+        .modal-overlay.active {
+            display: flex
+        }
+
+        .modal {
+            background: var(--black-2);
+            border: 1px solid var(--gold-border);
+            padding: 24px;
+            max-width: 500px;
+            width: 100%;
+            max-height: 90vh;
+            overflow-y: auto;
+            position: relative
+        }
+
+        .modal-title {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            color: var(--white)
+        }
+
+        .modal-close {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            background: transparent;
+            border: none;
+            color: var(--gray);
+            cursor: pointer;
+            font-size: 20px;
+            width: 28px;
+            height: 28px;
+            display: flex;
+            align-items: center;
+            justify-content: center
+        }
+
+        .modal-close:hover {
+            color: var(--gold)
+        }
+
+        .form-group {
+            margin-bottom: 16px
+        }
+
+        .form-label {
+            display: block;
+            font-size: 10px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            color: var(--gold);
+            margin-bottom: 6px;
+            font-weight: 500
+        }
+
+        .form-input {
+            width: 100%;
+            background: var(--black-3);
+            border: 1px solid var(--gold-border);
+            color: var(--white);
+            font-family: 'DM Sans', sans-serif;
+            font-size: 12px;
+            padding: 10px;
+            outline: none;
+            transition: border-color .2s
+        }
+
+        .form-input:focus {
+            border-color: var(--gold)
+        }
+
+        .form-input::placeholder {
+            color: var(--gray-dim)
+        }
+
+        .form-textarea {
+            resize: vertical;
+            min-height: 80px;
+            font-family: 'DM Sans', sans-serif
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 20px;
+            justify-content: flex-end
+        }
+
+        .btn-cancel {
+            background: transparent;
+            color: var(--gray);
+            border: 1px solid var(--gold-border)
+        }
+
+        .btn-cancel:hover {
+            color: var(--gold);
+            border-color: var(--gold)
+        }
+
+        .no-data {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--gray);
+            font-size: 12px
+        }
+
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 300px;
+            color: var(--gray)
+        }
+
+        .empty-state-icon {
+            font-size: 32px;
+            margin-bottom: 12px;
+            opacity: 0.5
+        }
+
+        .refresh-indicator {
+            font-size: 9px;
+            color: var(--gray-dim);
+            margin-left: auto
+        }
+
+        .badge-status {
+            font-size: 7px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            padding: 2px 6px;
+            border: 1px solid;
+            font-weight: 600;
+            display: inline-block
+        }
+
+        .badge-active {
+            color: var(--green);
+            border-color: rgba(74, 222, 128, .3)
+        }
+
+        .badge-inactive {
+            color: var(--gray);
+            border-color: rgba(144, 144, 144, .3)
+        }
+
+        @media (max-width: 1024px) {
+            .container {
+                padding: 16px 12px
+            }
+
+            .card-value {
+                font-size: 24px
+            }
+        }
+
+        @media (max-width: 640px) {
+            .overview-cards {
+                grid-template-columns: repeat(2, 1fr)
+            }
+
+            .charts-section,
+            .insights-section {
+                grid-template-columns: 1fr
+            }
+
+            .card-value {
+                font-size: 20px
+            }
+
+            .chart-container {
+                height: 250px
+            }
+
+            .topbar {
+                flex-direction: column;
+                align-items: flex-start
+            }
+
+            .topbar-right {
+                width: 100%;
+                justify-content: space-between
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="top-line"></div>
+    <div class="topbar">
+        <div class="topbar-left">
+            <a href="/dashboard" class="back-link">
+                <span>←</span>
+                <span>VOLTAR</span>
+            </a>
+            <div style="width: 1px; height: 16px; background: var(--gold-border);"></div>
+            <span class="page-title">ANALYTICS</span>
+        </div>
+        <div class="topbar-right">
+            <span class="last-update">Atualizado: <span id="lastUpdate">--:--</span></span>
+            <span class="refresh-indicator" id="refreshIndicator"></span>
+        </div>
+    </div>
+
+    <div class="container">
+        <div id="errorMsg" class="error-msg" style="display: none;"></div>
+
+        <!-- Section 1: Overview Cards -->
+        <div class="overview-cards" id="overviewCards">
+            <div class="loading">Carregando dados...</div>
+        </div>
+
+        <!-- Section 2: Charts -->
+        <div class="charts-section">
+            <div class="chart-box">
+                <div class="chart-label">Ligações por Dia (Últimos 30 dias)</div>
+                <div class="chart-container">
+                    <canvas id="callsByDayChart"></canvas>
+                </div>
+            </div>
+            <div class="chart-box">
+                <div class="chart-label">Melhor Horário</div>
+                <div class="chart-container">
+                    <canvas id="callsByHourChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Section 3 & 4: Insights and A/B Tests -->
+        <div class="insights-section">
+            <div class="insights-box">
+                <div class="chart-label">Insights & Aprendizados</div>
+
+                <div class="summary-card" id="summaryCard">
+                    <div class="loading">Carregando resumo...</div>
+                </div>
+
+                <div style="font-size: 8px; letter-spacing: 2px; text-transform: uppercase; color: var(--gold); margin: 12px 0 8px; font-weight: 500;">Insights Recentes</div>
+                <div class="insights-list" id="insightsList">
+                    <div class="loading">Carregando insights...</div>
+                </div>
+            </div>
+
+            <div class="ab-tests-box">
+                <div class="chart-label">Testes A/B</div>
+
+                <div class="ab-tests-list" id="abTestsList">
+                    <div class="loading">Carregando testes...</div>
+                </div>
+
+                <button class="btn btn-gold btn-new-test" onclick="openNewTestModal()">+ Novo Teste</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: New A/B Test -->
+    <div class="modal-overlay" id="newTestModal">
+        <div class="modal">
+            <button class="modal-close" onclick="closeNewTestModal()">×</button>
+            <div class="modal-title">Criar Novo Teste A/B</div>
+
+            <div class="form-group">
+                <label class="form-label">Nome do Teste</label>
+                <input type="text" class="form-input" id="testName" placeholder="Ex: Subject Line Test">
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Descrição</label>
+                <textarea class="form-input form-textarea" id="testDescription" placeholder="Descreva o objetivo do teste..."></textarea>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Nome - Variante A</label>
+                <input type="text" class="form-input" id="variantAName" placeholder="Ex: Control">
+            </div>
+
+            <div class="form-group">
+                <label class="form-label">Nome - Variante B</label>
+                <input type="text" class="form-input" id="variantBName" placeholder="Ex: Treatment">
+            </div>
+
+            <div class="modal-actions">
+                <button class="btn btn-cancel" onclick="closeNewTestModal()">CANCELAR</button>
+                <button class="btn btn-gold" onclick="createNewTest()">CRIAR TESTE</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ======================
+        // Auth & Token Management
+        // ======================
+        function getAuthToken() {
+            const token = localStorage.getItem('authToken');
+            if (!token) {
+                window.location.href = '/login';
+                return null;
+            }
+            return token;
+        }
+
+        function getAuthHeaders() {
+            const token = getAuthToken();
+            if (!token) return null;
+            return {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json'
+            };
+        }
+
+        async function fetchWithAuth(url, options = {}) {
+            const headers = getAuthHeaders();
+            if (!headers) return null;
+
+            try {
+                const response = await fetch(url, {
+                    ...options,
+                    headers: { ...headers, ...options.headers }
+                });
+
+                if (response.status === 401) {
+                    window.location.href = '/login';
+                    return null;
+                }
+
+                return response;
+            } catch (error) {
+                console.error('Fetch error:', error);
+                showError('Erro na requisição: ' + error.message);
+                return null;
+            }
+        }
+
+        // ======================
+        // Error Handling
+        // ======================
+        function showError(message) {
+            const errorDiv = document.getElementById('errorMsg');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+            setTimeout(() => {
+                errorDiv.style.display = 'none';
+            }, 5000);
+        }
+
+        // ======================
+        // Update Last Update Time
+        // ======================
+        function updateLastUpdate() {
+            const now = new Date();
+            const hours = String(now.getHours()).padStart(2, '0');
+            const minutes = String(now.getMinutes()).padStart(2, '0');
+            document.getElementById('lastUpdate').textContent = `${hours}:${minutes}`;
+        }
+
+        // ======================
+        // Section 1: Overview Cards
+        // ======================
+        async function loadOverviewCards() {
+            const response = await fetchWithAuth('/api/analytics/overview');
+            if (!response || !response.ok) {
+                showError('Erro ao carregar visão geral');
+                return;
+            }
+
+            const data = await response.json();
+            const container = document.getElementById('overviewCards');
+
+            const cards = [
+                { label: 'Total de Leads', value: data.total_leads || 0, subtitle: 'Cadastrados' },
+                { label: 'Ligações Hoje', value: data.calls_today || 0, subtitle: 'Realizadas' },
+                { label: 'Taxa de Conversão', value: (data.conversion_rate || 0).toFixed(1) + '%', subtitle: 'Geral' },
+                { label: 'Duração Média', value: (data.avg_duration || 0).toFixed(0) + 's', subtitle: 'Por chamada' },
+                { label: 'Reuniões Agendadas', value: data.meetings_scheduled || 0, subtitle: 'Hoje' },
+                { label: 'Leads Quentes', value: data.hot_leads || 0, subtitle: 'Hot Leads' }
+            ];
+
+            container.innerHTML = cards.map(card => `
+                <div class="card">
+                    <div class="card-label">${card.label}</div>
+                    <div class="card-value">${card.value}</div>
+                    <div class="card-subtitle">${card.subtitle}</div>
+                </div>
+            `).join('');
+        }
+
+        // ======================
+        // Section 2: Charts
+        // ======================
+        let callsByDayChart = null;
+        let callsByHourChart = null;
+
+        async function loadCallsByDayChart() {
+            const response = await fetchWithAuth('/api/analytics/calls/by-day');
+            if (!response || !response.ok) {
+                showError('Erro ao carregar gráfico de ligações');
+                return;
+            }
+
+            const data = await response.json();
+
+            const ctx = document.getElementById('callsByDayChart').getContext('2d');
+            if (callsByDayChart) callsByDayChart.destroy();
+
+            callsByDayChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: data.labels || [],
+                    datasets: [{
+                        label: 'Ligações',
+                        data: data.values || [],
+                        backgroundColor: 'var(--gold)',
+                        borderColor: 'var(--gold-light)',
+                        borderWidth: 1,
+                        borderRadius: 2,
+                        barPercentage: 0.8
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        x: {
+                            grid: { color: 'var(--gold-border)', drawBorder: false },
+                            ticks: { color: 'var(--gray)', font: { size: 9 } }
+                        },
+                        y: {
+                            grid: { color: 'var(--gold-border)', drawBorder: false },
+                            ticks: { color: 'var(--gray)', font: { size: 9 } },
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+        }
+
+        async function loadCallsByHourChart() {
+            const response = await fetchWithAuth('/api/analytics/calls/by-hour');
+            if (!response || !response.ok) {
+                showError('Erro ao carregar gráfico de horários');
+                return;
+            }
+
+            const data = await response.json();
+
+            const ctx = document.getElementById('callsByHourChart').getContext('2d');
+            if (callsByHourChart) callsByHourChart.destroy();
+
+            callsByHourChart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: data.labels || [],
+                    datasets: [{
+                        label: 'Ligações',
+                        data: data.values || [],
+                        backgroundColor: 'var(--gold)',
+                        borderColor: 'var(--gold-light)',
+                        borderWidth: 1,
+                        borderRadius: 2,
+                        barPercentage: 0.7
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        x: {
+                            grid: { color: 'var(--gold-border)', drawBorder: false },
+                            ticks: { color: 'var(--gray)', font: { size: 9 } }
+                        },
+                        y: {
+                            grid: { color: 'var(--gold-border)', drawBorder: false },
+                            ticks: { color: 'var(--gray)', font: { size: 9 } },
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+        }
+
+        // ======================
+        // Section 3: Insights
+        // ======================
+        async function loadInsightsSummary() {
+            const response = await fetchWithAuth('/api/analytics/insights/summary');
+            if (!response || !response.ok) {
+                return;
+            }
+
+            const data = await response.json();
+            const card = document.getElementById('summaryCard');
+
+            card.innerHTML = `
+                <div class="summary-item">
+                    <span class="summary-label">Engagement Médio</span>
+                    <span class="summary-value">${(data.avg_engagement || 0).toFixed(1)}%</span>
+                </div>
+                <div class="summary-item">
+                    <span class="summary-label">Sentimento Médio</span>
+                    <span class="summary-value">${data.avg_sentiment || 'Neutro'}</span>
+                </div>
+                <div class="summary-item">
+                    <span class="summary-label">Top Abordagem</span>
+                    <span class="summary-value">${data.top_approach || '--'}</span>
+                </div>
+            `;
+        }
+
+        async function loadInsightsList() {
+            const response = await fetchWithAuth('/api/analytics/insights?limite=10');
+            if (!response || !response.ok) {
+                showError('Erro ao carregar insights');
+                return;
+            }
+
+            const data = await response.json();
+            const container = document.getElementById('insightsList');
+
+            if (!data.insights || data.insights.length === 0) {
+                container.innerHTML = '<div class="no-data">Nenhum insight disponível</div>';
+                return;
+            }
+
+            container.innerHTML = data.insights.map(insight => {
+                const typeMap = {
+                    'what_worked': { label: 'Funcionou', class: 'worked' },
+                    'what_failed': { label: 'Falhou', class: 'failed' },
+                    'suggestion': { label: 'Sugestão', class: 'suggestion' }
+                };
+                const typeInfo = typeMap[insight.type] || { label: 'Outro', class: 'suggestion' };
+
+                return `
+                    <div class="insight-item">
+                        <div class="insight-header">
+                            <span class="insight-type ${typeInfo.class}">${typeInfo.label}</span>
+                        </div>
+                        <div class="insight-text">${insight.description || 'Sem descrição'}</div>
+                        <div class="insight-desc">${insight.details || ''}</div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // ======================
+        // Section 4: A/B Tests
+        // ======================
+        async function loadABTests() {
+            const response = await fetchWithAuth('/api/analytics/ab-tests');
+            if (!response || !response.ok) {
+                showError('Erro ao carregar testes A/B');
+                return;
+            }
+
+            const data = await response.json();
+            const container = document.getElementById('abTestsList');
+
+            if (!data.tests || data.tests.length === 0) {
+                container.innerHTML = '<div class="no-data">Nenhum teste ativo</div>';
+                return;
+            }
+
+            container.innerHTML = data.tests.map(test => {
+                const rateA = test.variant_a_conversion || 0;
+                const rateB = test.variant_b_conversion || 0;
+                const winner = rateA > rateB ? 'A' : (rateB > rateA ? 'B' : 'Empatado');
+                const confidence = test.confidence || 0;
+                const status = test.status || 'active';
+
+                return `
+                    <div class="ab-test-item">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                            <div class="ab-test-name">${test.name}</div>
+                            <span class="badge-status badge-${status}">${status.toUpperCase()}</span>
+                        </div>
+                        <div class="ab-test-description">${test.description || 'Sem descrição'}</div>
+                        <div class="ab-test-variants">
+                            <div class="ab-variant">
+                                <div class="ab-variant-name">${test.variant_a_name || 'Variante A'}</div>
+                                <div class="ab-variant-rate">${rateA.toFixed(1)}%</div>
+                            </div>
+                            <div class="ab-variant">
+                                <div class="ab-variant-name">${test.variant_b_name || 'Variante B'}</div>
+                                <div class="ab-variant-rate">${rateB.toFixed(1)}%</div>
+                            </div>
+                        </div>
+                        ${winner !== 'Empatado' ? `<div class="ab-test-winner">✓ Vencedor: Variante ${winner}</div>` : '<div class="ab-test-winner">Sem vencedor ainda</div>'}
+                        <div class="ab-test-confidence">Confiança: ${confidence}%</div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // ======================
+        // Modal: Create New Test
+        // ======================
+        function openNewTestModal() {
+            document.getElementById('newTestModal').classList.add('active');
+        }
+
+        function closeNewTestModal() {
+            document.getElementById('newTestModal').classList.remove('active');
+            document.getElementById('testName').value = '';
+            document.getElementById('testDescription').value = '';
+            document.getElementById('variantAName').value = '';
+            document.getElementById('variantBName').value = '';
+        }
+
+        async function createNewTest() {
+            const name = document.getElementById('testName').value.trim();
+            const description = document.getElementById('testDescription').value.trim();
+            const variantAName = document.getElementById('variantAName').value.trim();
+            const variantBName = document.getElementById('variantBName').value.trim();
+
+            if (!name || !variantAName || !variantBName) {
+                showError('Preencha todos os campos obrigatórios');
+                return;
+            }
+
+            const response = await fetchWithAuth('/api/analytics/ab-tests', {
+                method: 'POST',
+                body: JSON.stringify({
+                    name,
+                    description,
+                    variant_a_name: variantAName,
+                    variant_b_name: variantBName
+                })
+            });
+
+            if (!response || !response.ok) {
+                showError('Erro ao criar teste');
+                return;
+            }
+
+            closeNewTestModal();
+            loadABTests();
+        }
+
+        // ======================
+        // Auto-refresh & Initialization
+        // ======================
+        async function refreshAllData() {
+            updateLastUpdate();
+            await Promise.all([
+                loadOverviewCards(),
+                loadCallsByDayChart(),
+                loadCallsByHourChart(),
+                loadInsightsSummary(),
+                loadInsightsList(),
+                loadABTests()
+            ]);
+        }
+
+        // Initial load
+        refreshAllData();
+
+        // Auto-refresh every 60 seconds
+        setInterval(refreshAllData, 60000);
+    </script>
+</body>
+
+</html>

@@ -210,6 +210,82 @@ class User(Base):
     updated_at    = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class CallInsight(Base):
+    """Insights extraídos automaticamente de cada ligação."""
+    __tablename__ = "call_insights"
+
+    id            = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    call_id       = Column(String, ForeignKey("call_sessions.id"))
+    lead_id       = Column(String, ForeignKey("leads.id"))
+
+    # O que funcionou
+    approach_used = Column(String, default="")       # ex: "consultiva", "direta", "empática"
+    opening_style = Column(String, default="")       # como abriu a conversa
+    objection_handled = Column(Text, default="")     # objeções que apareceram e como lidou
+
+    # Resultado
+    outcome       = Column(String, default="")       # "converteu", "callback", "sem_interesse", "nao_atendeu"
+    temperature   = Column(String, default="")       # hot/warm/cold
+    duration_sec  = Column(Integer, default=0)
+
+    # Aprendizados
+    what_worked   = Column(Text, default="")         # GPT análise: o que funcionou
+    what_failed   = Column(Text, default="")         # GPT análise: o que não funcionou
+    suggestion    = Column(Text, default="")         # sugestão de melhoria pro próximo
+
+    # Métricas
+    client_engagement = Column(Float, default=0)     # 0-10 engajamento do cliente
+    sentiment_score   = Column(Float, default=0)     # -1 a 1 sentimento
+
+    created_at    = Column(DateTime, default=datetime.utcnow)
+
+
+class ABTest(Base):
+    """Testes A/B de abordagem."""
+    __tablename__ = "ab_tests"
+
+    id            = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    name          = Column(String, nullable=False)    # ex: "Abertura direta vs consultiva"
+    description   = Column(Text, default="")
+
+    variant_a_name  = Column(String, default="A")
+    variant_a_config = Column(Text, default="{}")    # JSON com config da variante
+    variant_b_name  = Column(String, default="B")
+    variant_b_config = Column(Text, default="{}")    # JSON com config da variante
+
+    metric        = Column(String, default="conversion_rate")  # métrica principal
+    status        = Column(String, default="active")           # active, paused, completed
+
+    total_a       = Column(Integer, default=0)
+    total_b       = Column(Integer, default=0)
+    conversions_a = Column(Integer, default=0)
+    conversions_b = Column(Integer, default=0)
+
+    winner        = Column(String, default="")       # "A", "B", "" (undecided)
+    confidence    = Column(Float, default=0)          # 0-100 statistical confidence
+
+    created_at    = Column(DateTime, default=datetime.utcnow)
+    completed_at  = Column(DateTime, nullable=True)
+
+
+class ABResult(Base):
+    """Resultado individual de um teste A/B."""
+    __tablename__ = "ab_results"
+
+    id            = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    test_id       = Column(String, ForeignKey("ab_tests.id"))
+    lead_id       = Column(String, ForeignKey("leads.id"))
+    call_id       = Column(String, ForeignKey("call_sessions.id"), nullable=True)
+
+    variant       = Column(String, default="")       # "A" or "B"
+    outcome       = Column(String, default="")       # "converteu", "callback", "sem_interesse"
+    temperature   = Column(String, default="")
+    duration_sec  = Column(Integer, default=0)
+    notes         = Column(Text, default="")
+
+    created_at    = Column(DateTime, default=datetime.utcnow)
+
+
 def init_db():
     Base.metadata.create_all(bind=engine)
     _migrar_colunas()
@@ -343,6 +419,9 @@ def _migrar_colunas():
         "ALTER TABLE meetings ADD COLUMN IF NOT EXISTS transcript TEXT DEFAULT ''",
         "CREATE TABLE IF NOT EXISTS wpp_mensagens (id VARCHAR PRIMARY KEY, lead_id VARCHAR NOT NULL REFERENCES leads(id), role VARCHAR NOT NULL, content TEXT NOT NULL, created_at TIMESTAMP DEFAULT NOW())",
         "CREATE TABLE IF NOT EXISTS users (id VARCHAR PRIMARY KEY, email VARCHAR UNIQUE NOT NULL, password_hash VARCHAR NOT NULL, name VARCHAR DEFAULT '', role VARCHAR DEFAULT 'funcionario', active BOOLEAN DEFAULT TRUE, created_at TIMESTAMP DEFAULT NOW(), updated_at TIMESTAMP DEFAULT NOW())",
+        "CREATE TABLE IF NOT EXISTS call_insights (id VARCHAR PRIMARY KEY, call_id VARCHAR REFERENCES call_sessions(id), lead_id VARCHAR REFERENCES leads(id), approach_used VARCHAR DEFAULT '', opening_style VARCHAR DEFAULT '', objection_handled TEXT DEFAULT '', outcome VARCHAR DEFAULT '', temperature VARCHAR DEFAULT '', duration_sec INTEGER DEFAULT 0, what_worked TEXT DEFAULT '', what_failed TEXT DEFAULT '', suggestion TEXT DEFAULT '', client_engagement FLOAT DEFAULT 0, sentiment_score FLOAT DEFAULT 0, created_at TIMESTAMP DEFAULT NOW())",
+        "CREATE TABLE IF NOT EXISTS ab_tests (id VARCHAR PRIMARY KEY, name VARCHAR NOT NULL, description TEXT DEFAULT '', variant_a_name VARCHAR DEFAULT 'A', variant_a_config TEXT DEFAULT '{}', variant_b_name VARCHAR DEFAULT 'B', variant_b_config TEXT DEFAULT '{}', metric VARCHAR DEFAULT 'conversion_rate', status VARCHAR DEFAULT 'active', total_a INTEGER DEFAULT 0, total_b INTEGER DEFAULT 0, conversions_a INTEGER DEFAULT 0, conversions_b INTEGER DEFAULT 0, winner VARCHAR DEFAULT '', confidence FLOAT DEFAULT 0, created_at TIMESTAMP DEFAULT NOW(), completed_at TIMESTAMP)",
+        "CREATE TABLE IF NOT EXISTS ab_results (id VARCHAR PRIMARY KEY, test_id VARCHAR REFERENCES ab_tests(id), lead_id VARCHAR REFERENCES leads(id), call_id VARCHAR REFERENCES call_sessions(id), variant VARCHAR DEFAULT '', outcome VARCHAR DEFAULT '', temperature VARCHAR DEFAULT '', duration_sec INTEGER DEFAULT 0, notes TEXT DEFAULT '', created_at TIMESTAMP DEFAULT NOW())",
     ]
     with engine.connect() as conn:
         for sql in migracoes:

@@ -8,7 +8,7 @@ from voice.brain import classificar_lead
 from integrations.whatsapp import enviar_whatsapp, enviar_confirmacao_agendamento, enviar_agendamento_whatsapp
 from db.database import normalizar_telefone
 from datetime import datetime
-import os, json, asyncio, uuid, re
+import os, json, asyncio, uuid, re, threading
 
 router = APIRouter()
 
@@ -260,6 +260,20 @@ def ligar(dados: LigarPayload, db: Session = Depends(get_db)):
             return {"erro": f"Lead já foi contatado — stage atual: {lead.stage}"}
 
         print(f"📞 Tentando ligar para {lead.name} ({lead.phone}) — stage: {lead.stage}")
+
+        # ── A/B Test: seleciona variante se houver teste ativo ─────────
+        ab_variant = None
+        ab_test_id = None
+        try:
+            from services.ab_service import obter_teste_ativo, selecionar_variante
+            teste_ativo = obter_teste_ativo(db)
+            if teste_ativo:
+                ab_variant, ab_config = selecionar_variante(teste_ativo.id, db)
+                ab_test_id = teste_ativo.id
+                print(f"🧪 A/B Test: variante {ab_variant} selecionada para {lead.name}")
+        except Exception as e:
+            print(f"⚠️ Erro A/B test: {e}")
+
         try:
             conversation_id = fazer_ligacao(lead.phone, lead.name or "", lead.company or "", lead.cnpj or "")
         except Exception as e:
@@ -272,7 +286,7 @@ def ligar(dados: LigarPayload, db: Session = Depends(get_db)):
         lead.call_sid      = conversation_id
         db.commit()
         print(f"✅ Ligação iniciada para {lead.name} — conv: {conversation_id}")
-        return {"mensagem": "Ligação iniciada!", "conversation_id": conversation_id, "lead": lead.name}
+        return {"mensagem": "Ligação iniciada!", "conversation_id": conversation_id, "lead": lead.name, "ab_variant": ab_variant, "ab_test_id": ab_test_id}
     else:
         phone_limpo = "".join(c for c in (dados.phone or "") if c.isdigit())
         lead_existente = db.query(Lead).filter(Lead.phone.contains(phone_limpo[-8:])).first()
@@ -539,6 +553,23 @@ async def pos_chamada(request: Request, db: Session = Depends(get_db)):
             )
             db.add(sessao)
             db.commit()
+
+            # ── CRITIQUE: Analisa a ligação em background ──────────────────────
+            try:
+                from services.critique_service import analisar_ligacao
+                def _critique_bg(cid):
+                    from db.database import SessionLocal
+                    s = SessionLocal()
+                    try:
+                        analisar_ligacao(cid, s)
+                    except Exception as ex:
+                        print(f"⚠️ Erro critique background: {ex}")
+                    finally:
+                        s.close()
+                threading.Thread(target=_critique_bg, args=(sessao.id,), daemon=True).start()
+            except Exception as e:
+                print(f"⚠️ Erro ao iniciar critique: {e}")
+
             print(f"📅 {lead.name} pediu callback às {horario} ({periodo}) — agendado!")
             return {"ok": True, "stage": "callback_agendado", "callback_horario": horario}
 
@@ -585,6 +616,22 @@ async def pos_chamada(request: Request, db: Session = Depends(get_db)):
     db.add(sessao)
     lead.updated_at = datetime.utcnow()
     db.commit()
+
+    # ── CRITIQUE: Analisa a ligação em background ──────────────────────
+    try:
+        from services.critique_service import analisar_ligacao
+        def _critique_bg(cid):
+            from db.database import SessionLocal
+            s = SessionLocal()
+            try:
+                analisar_ligacao(cid, s)
+            except Exception as ex:
+                print(f"⚠️ Erro critique background: {ex}")
+            finally:
+                s.close()
+        threading.Thread(target=_critique_bg, args=(sessao.id,), daemon=True).start()
+    except Exception as e:
+        print(f"⚠️ Erro ao iniciar critique: {e}")
 
     print(f"✅ Lead {lead.name} → stage: {lead.stage} | temp: {lead.temperature}")
     return {"ok": True, "stage": lead.stage, "temperatura": lead.temperature}
