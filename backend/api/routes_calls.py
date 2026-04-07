@@ -7,10 +7,46 @@ from voice.dialer import fazer_ligacao
 from voice.brain import classificar_lead
 from integrations.whatsapp import enviar_whatsapp, enviar_confirmacao_agendamento, enviar_agendamento_whatsapp
 from db.database import normalizar_telefone
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import os, json, asyncio, uuid, re, threading
 
 router = APIRouter()
+
+# ── CONTROLE DE LOTE ─────────────────────────────────────────────────────────
+BRT = timezone(timedelta(hours=-3))
+
+_lote_estado = {
+    "ativo": False,
+    "pausado": False,
+    "cancelado": False,
+    "total": 0,
+    "processados": 0,
+    "status": "parado",
+}
+
+
+def _agora_brt():
+    return datetime.now(BRT)
+
+
+def _dentro_horario() -> bool:
+    agora = _agora_brt()
+    minutos = agora.hour * 60 + agora.minute
+    return (540 <= minutos < 705) or (810 <= minutos < 1065)
+
+
+def _segundos_ate_proximo_horario() -> int:
+    agora = _agora_brt()
+    minutos = agora.hour * 60 + agora.minute
+    if minutos < 540:
+        alvo = agora.replace(hour=9, minute=0, second=0, microsecond=0)
+    elif minutos < 810:
+        alvo = agora.replace(hour=13, minute=30, second=0, microsecond=0)
+    else:
+        amanha = agora + timedelta(days=1)
+        alvo = amanha.replace(hour=9, minute=0, second=0, microsecond=0)
+    return max(int((alvo - agora).total_seconds()), 1)
+
 
 # Variáveis de configuração da IA
 IA_NAME = os.getenv("IA_NAME", "Julia")
@@ -305,7 +341,9 @@ async def disparar_lote(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
 ):
-    # Só liga pra leads NOVOS que NUNCA foram ligados
+    if _lote_estado["ativo"]:
+        return {"mensagem": "Já existe um lote rodando!", "total": 0}
+
     query = db.query(Lead).filter(
         Lead.stage == "novo",
         Lead.call_attempts == 0,
@@ -318,13 +356,54 @@ async def disparar_lote(
         return {"mensagem": "Nenhum lead novo encontrado", "total": 0}
 
     lead_ids = [l.id for l in leads]
+    _lote_estado.update({"ativo": True, "cancelado": False, "pausado": False,
+                         "total": len(lead_ids), "processados": 0, "status": "rodando"})
     background_tasks.add_task(_executar_lote, lead_ids, dados.intervalo_segundos)
 
     return {
-        "mensagem": "Disparando lote em background!",
+        "mensagem": "Lote disparado! Respeita horário comercial (9h-11:45 / 13:30-17:45).",
         "total_leads": len(lead_ids),
         "intervalo_segundos": dados.intervalo_segundos,
-        "tempo_estimado_minutos": round((len(lead_ids) * dados.intervalo_segundos) / 60, 1)
+    }
+
+
+@router.post("/lote/pausar")
+async def pausar_lote():
+    if not _lote_estado["ativo"]:
+        return {"mensagem": "Nenhum lote ativo"}
+    _lote_estado["pausado"] = True
+    _lote_estado["status"] = "pausado_manual"
+    return {"mensagem": "Lote pausado!"}
+
+
+@router.post("/lote/retomar")
+async def retomar_lote():
+    if not _lote_estado["ativo"]:
+        return {"mensagem": "Nenhum lote ativo"}
+    _lote_estado["pausado"] = False
+    _lote_estado["status"] = "rodando"
+    return {"mensagem": "Lote retomado!"}
+
+
+@router.post("/lote/cancelar")
+async def cancelar_lote():
+    if not _lote_estado["ativo"]:
+        return {"mensagem": "Nenhum lote ativo"}
+    _lote_estado["cancelado"] = True
+    _lote_estado["status"] = "cancelado"
+    return {"mensagem": "Lote cancelado!"}
+
+
+@router.get("/lote/status")
+async def status_lote():
+    return {
+        "ativo": _lote_estado["ativo"],
+        "status": _lote_estado["status"],
+        "total": _lote_estado["total"],
+        "processados": _lote_estado["processados"],
+        "restantes": _lote_estado["total"] - _lote_estado["processados"],
+        "horario_atual": _agora_brt().strftime("%H:%M"),
+        "dentro_horario": _dentro_horario(),
     }
 
 
@@ -333,22 +412,47 @@ async def _executar_lote(lead_ids: list, intervalo: int):
     db = SessionLocal()
     try:
         for i, lead_id in enumerate(lead_ids):
+            if _lote_estado["cancelado"]:
+                print(f"🛑 Lote cancelado. {i}/{len(lead_ids)} processados.")
+                break
+            while _lote_estado["pausado"]:
+                if _lote_estado["cancelado"]:
+                    break
+                await asyncio.sleep(30)
+            if _lote_estado["cancelado"]:
+                break
+            while not _dentro_horario():
+                espera = _segundos_ate_proximo_horario()
+                proximo = (_agora_brt() + timedelta(seconds=espera)).strftime("%d/%m %H:%M")
+                print(f"⏰ Fora do horário comercial. Próxima janela: {proximo}")
+                _lote_estado["status"] = "pausado_horario"
+                await asyncio.sleep(espera)
+                _lote_estado["status"] = "rodando"
+            if _lote_estado["cancelado"]:
+                break
             lead = db.get(Lead, lead_id)
             if not lead or lead.stage != "novo" or lead.call_attempts > 0:
+                _lote_estado["processados"] += 1
                 continue
             try:
-                print(f"📞 Lote [{i+1}/{len(lead_ids)}] — {lead.name} ({lead.phone})")
+                restantes = len(lead_ids) - i
+                print(f"📞 Lote [{i+1}/{len(lead_ids)}] ({restantes} restantes) — {lead.name} ({lead.phone})")
                 conv_id = fazer_ligacao(lead.phone, lead.name or "", lead.company or "", lead.cnpj or "")
                 lead.stage         = "ligando"
                 lead.call_attempts += 1
                 lead.last_call_at  = datetime.utcnow()
                 lead.call_sid      = conv_id
                 db.commit()
+                _lote_estado["processados"] += 1
             except Exception as e:
                 print(f"   ❌ Erro: {e}")
+                _lote_estado["processados"] += 1
             if i < len(lead_ids) - 1:
                 await asyncio.sleep(intervalo)
     finally:
+        _lote_estado["ativo"] = False
+        _lote_estado["status"] = "parado"
+        print(f"✅ Lote finalizado: {_lote_estado['processados']}/{_lote_estado['total']} processados")
         db.close()
 
 
