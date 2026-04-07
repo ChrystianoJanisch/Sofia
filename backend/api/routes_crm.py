@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from db.database import get_db, Lead, CallSession
 from pydantic import BaseModel
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 
 router = APIRouter()
 
@@ -45,7 +45,7 @@ def pipeline(db: Session = Depends(get_db)):
             "agendado_hora": l.agendado_hora,
             "especialista": l.especialista,
             "call_attempts": l.call_attempts,
-            "last_call_at": str(l.last_call_at) if l.last_call_at else None,
+            "last_call_at": str(l.last_call_at - timedelta(hours=3)) if l.last_call_at else None,
             "created_at": str(l.created_at)
         })
 
@@ -121,7 +121,7 @@ def leads_para_retentar(db: Session = Depends(get_db)):
             "phone": l.phone,
             "stage": l.stage,
             "call_attempts": l.call_attempts,
-            "last_call_at": str(l.last_call_at) if l.last_call_at else None
+            "last_call_at": str(l.last_call_at - timedelta(hours=3)) if l.last_call_at else None
         }
         for l in leads
     ]
