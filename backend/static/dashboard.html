@@ -914,6 +914,7 @@
                 <button class="btn btn-outline master-only"
                     onclick="document.getElementById('csvInput').click()">CSV</button>
                 <input type="file" id="csvInput" accept=".csv" style="display:none" onchange="importarCSV(event)">
+        <button class="btn btn-outline master-only" onclick="abrirBroadcast()" style="background:rgba(37,211,102,0.15);border-color:#25d366;color:#25d366">📢 BROADCAST</button>
                 <button class="btn btn-gold master-only" onclick="abrirModalNovo()">+ LEAD</button>
                 <button class="btn btn-danger master-only" id="btn-del-sel" style="display:none"
                     onclick="excluirSelecionados()">🗑 EXCLUIR SELECIONADOS (<span id="sel-count">0</span>)</button>
@@ -982,6 +983,30 @@
             <div id="lista-todas"></div>
         </div>
     </div>
+  <div class="modal-overlay" id="modal-broadcast">
+    <div class="modal" style="max-width:500px">
+      <button class="modal-close" onclick="fecharBroadcast()">✕</button>
+      <h2>Broadcast WhatsApp</h2>
+      <p style="color:var(--gray-dim);font-size:13px;margin-bottom:16px">Envia uma imagem + legenda para todos os leads do CRM.</p>
+      <div class="field">
+        <label>Imagem</label>
+        <input type="file" id="bc-file" accept="image/*" style="background:var(--black-1);padding:10px;border-radius:8px;width:100%;border:1px solid var(--gold-border)">
+      </div>
+      <div class="field" id="bc-preview-wrap" style="display:none;text-align:center">
+        <img id="bc-preview" style="max-height:200px;border-radius:8px;margin:8px 0">
+      </div>
+      <div class="field">
+        <label>Legenda</label>
+        <textarea id="bc-caption" rows="3" placeholder="Texto que acompanha a imagem..."
+          style="width:100%;background:var(--black-1);color:#fff;border:1px solid var(--gold-border);border-radius:8px;padding:10px;font-size:14px;resize:vertical"></textarea>
+      </div>
+      <div id="bc-status" style="display:none;font-size:12px;color:var(--gold);margin-bottom:12px"></div>
+      <div style="display:flex;gap:10px;justify-content:flex-end">
+        <button class="btn btn-outline" onclick="fecharBroadcast()">CANCELAR</button>
+        <button class="btn btn-gold" id="bc-enviar" onclick="enviarBroadcast()">ENVIAR PARA TODOS</button>
+      </div>
+    </div>
+  </div>
     <div class="modal-overlay" id="modal-lead">
         <div class="modal">
             <button class="modal-close" onclick="fecharModalLead()">✕</button>
@@ -1216,6 +1241,13 @@
         function lotePausar() { authFetch(API() + '/api/calls/lote/pausar', { method: 'POST' }).then(function (r) { return r.json() }).then(function (d) { toast(d.mensagem, 'info'); atualizarLoteUI() }) }
         function loteRetomar() { authFetch(API() + '/api/calls/lote/retomar', { method: 'POST' }).then(function (r) { return r.json() }).then(function (d) { toast(d.mensagem, 'info'); atualizarLoteUI() }) }
         function loteCancelar() { if (!confirm('Cancelar o lote?')) return; authFetch(API() + '/api/calls/lote/cancelar', { method: 'POST' }).then(function (r) { return r.json() }).then(function (d) { toast(d.mensagem, 'info'); atualizarLoteUI(); loadLeads() }) }
+    // ── BROADCAST ────────────────────────────────────────────────────────
+    function abrirBroadcast() { document.getElementById('modal-broadcast').classList.add('open'); document.getElementById('bc-file').value = ''; document.getElementById('bc-caption').value = ''; document.getElementById('bc-preview-wrap').style.display = 'none'; document.getElementById('bc-status').style.display = 'none'; document.getElementById('bc-enviar').disabled = false; document.getElementById('bc-enviar').textContent = 'ENVIAR PARA TODOS' }
+    function fecharBroadcast() { document.getElementById('modal-broadcast').classList.remove('open') }
+    document.getElementById('bc-file').addEventListener('change', function (e) { var f = e.target.files[0]; if (f) { var r = new FileReader(); r.onload = function (ev) { document.getElementById('bc-preview').src = ev.target.result; document.getElementById('bc-preview-wrap').style.display = '' }; r.readAsDataURL(f) } });
+    function enviarBroadcast() { var file = document.getElementById('bc-file').files[0]; var caption = document.getElementById('bc-caption').value.trim(); if (!file) { toast('Selecione uma imagem', 'error'); return } var total = leads.length; if (!confirm('Enviar imagem para ' + total + ' leads via WhatsApp?')) return; var fd = new FormData(); fd.append('file', file); fd.append('caption', caption); document.getElementById('bc-enviar').disabled = true; document.getElementById('bc-enviar').textContent = 'ENVIANDO...'; authFetch(API() + '/api/leads/broadcast', { method: 'POST', body: fd }).then(function (r) { return r.json() }).then(function (d) { if (d.erro) { toast(d.erro, 'error'); document.getElementById('bc-enviar').disabled = false; document.getElementById('bc-enviar').textContent = 'ENVIAR PARA TODOS'; return } toast(d.mensagem, 'success'); document.getElementById('bc-status').style.display = ''; _bcInterval = setInterval(atualizarBcStatus, 3000) }).catch(function (e) { toast('Erro: ' + e.message, 'error'); document.getElementById('bc-enviar').disabled = false; document.getElementById('bc-enviar').textContent = 'ENVIAR PARA TODOS' }) }
+    var _bcInterval = null;
+    function atualizarBcStatus() { authFetch(API() + '/api/leads/broadcast/status').then(function (r) { return r.json() }).then(function (d) { var el = document.getElementById('bc-status'); el.style.display = ''; el.textContent = (d.ativo ? 'Enviando' : 'Finalizado') + ' — ' + d.enviados + '/' + d.total + ' enviados' + (d.erros > 0 ? ', ' + d.erros + ' erros' : ''); if (!d.ativo) { clearInterval(_bcInterval); _bcInterval = null; document.getElementById('bc-enviar').disabled = false; document.getElementById('bc-enviar').textContent = 'ENVIAR PARA TODOS' } }).catch(function () {}) }
         function importarCSV(ev) { var f = ev.target.files[0]; if (!f) return; var fd = new FormData(); fd.append('file', f); authFetch(API() + '/api/leads/importar-csv', { method: 'POST', body: fd }).then(function (r) { return r.json() }).then(function (d) { toast((d.importados || 0) + ' importados', 'success'); loadLeads() }).catch(function (e) { toast('Erro: ' + e.message, 'error') }); ev.target.value = '' }
         function deletarLead(id, nm) { if (!confirm('Remover ' + nm + '?')) return; authFetch(API() + '/api/leads/' + id, { method: 'DELETE' }).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json() }).then(function () { toast(nm + ' removido', 'success'); loadLeads() }).catch(function (e) { toast('Erro: ' + e.message, 'error') }) }
         function toggleIA(id) { authFetch(API() + '/api/leads/' + id + '/pausar-ia', { method: 'POST' }).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json() }).then(function (d) { toast(d.mensagem, 'success'); loadLeads() }).catch(function (e) { toast('Erro: ' + e.message, 'error') }) }

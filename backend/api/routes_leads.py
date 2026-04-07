@@ -1,11 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Form
 from fastapi import UploadFile, File
 from pydantic import BaseModel
 from typing import Optional
 from sqlalchemy.orm import Session
 from db.database import get_db, Lead, CallSession, Meeting, WppMensagem, Callback, Transferencia, normalizar_telefone
 from datetime import datetime, timedelta
-import csv, io
+import csv, io, os, asyncio, uuid
 
 router = APIRouter()
 
@@ -247,3 +247,101 @@ def toggle_pausar_ia(lead_id: str, db: Session = Depends(get_db)):
     status = "pausada" if lead.ia_pausada else "ativada"
     print(f"{'⏸️' if lead.ia_pausada else '▶️'} IA {status} para {lead.name} ({lead.phone})")
     return {"mensagem": f"IA {status}", "ia_pausada": lead.ia_pausada}
+
+
+# ── BROADCAST WHATSAPP ───────────────────────────────────────────────────────
+
+_broadcast_estado = {
+    "ativo": False,
+    "total": 0,
+    "enviados": 0,
+    "erros": 0,
+    "status": "parado",
+}
+
+
+@router.post("/broadcast")
+async def broadcast_imagem(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    caption: str = Form(""),
+    db: Session = Depends(get_db)
+):
+    if _broadcast_estado["ativo"]:
+        return {"erro": "Já existe um broadcast rodando!"}
+
+    ext = file.filename.rsplit(".", 1)[-1] if "." in file.filename else "jpg"
+    nome_arquivo = f"broadcast_{uuid.uuid4().hex[:8]}.{ext}"
+    pasta = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "static", "img")
+    os.makedirs(pasta, exist_ok=True)
+    caminho = os.path.join(pasta, nome_arquivo)
+
+    conteudo = await file.read()
+    with open(caminho, "wb") as f:
+        f.write(conteudo)
+
+    base_url = os.getenv("WEBHOOK_BASE_URL", "https://sofia-ai-production.up.railway.app")
+    url_imagem = f"{base_url}/static/img/{nome_arquivo}"
+
+    leads = db.query(Lead).filter(Lead.phone != None, Lead.phone != "").all()
+    telefones = list(set(l.phone for l in leads if l.phone and len(l.phone) >= 8))
+
+    if not telefones:
+        return {"erro": "Nenhum lead com telefone encontrado"}
+
+    _broadcast_estado.update({
+        "ativo": True, "total": len(telefones),
+        "enviados": 0, "erros": 0, "status": "rodando"
+    })
+
+    background_tasks.add_task(_executar_broadcast, telefones, url_imagem, caption)
+
+    return {
+        "mensagem": f"Broadcast iniciado para {len(telefones)} leads!",
+        "total": len(telefones),
+        "imagem": url_imagem,
+    }
+
+
+@router.get("/broadcast/status")
+async def broadcast_status():
+    return {
+        "ativo": _broadcast_estado["ativo"],
+        "status": _broadcast_estado["status"],
+        "total": _broadcast_estado["total"],
+        "enviados": _broadcast_estado["enviados"],
+        "erros": _broadcast_estado["erros"],
+        "restantes": _broadcast_estado["total"] - _broadcast_estado["enviados"] - _broadcast_estado["erros"],
+    }
+
+
+@router.post("/broadcast/cancelar")
+async def broadcast_cancelar():
+    if not _broadcast_estado["ativo"]:
+        return {"mensagem": "Nenhum broadcast ativo"}
+    _broadcast_estado["status"] = "cancelado"
+    return {"mensagem": "Broadcast cancelado!"}
+
+
+async def _executar_broadcast(telefones: list, url_imagem: str, caption: str):
+    from integrations.whatsapp import enviar_imagem
+    try:
+        for i, tel in enumerate(telefones):
+            if _broadcast_estado["status"] == "cancelado":
+                print(f"🛑 Broadcast cancelado. {i}/{len(telefones)}")
+                break
+            try:
+                enviar_imagem(tel, url_imagem, caption=caption)
+                _broadcast_estado["enviados"] += 1
+                print(f"📤 Broadcast [{i+1}/{len(telefones)}] — {tel}")
+            except Exception as e:
+                _broadcast_estado["erros"] += 1
+                print(f"❌ Broadcast erro {tel}: {e}")
+            if i < len(telefones) - 1:
+                await asyncio.sleep(2)
+    finally:
+        _broadcast_estado["ativo"] = False
+        _broadcast_estado["status"] = "parado"
+        total = _broadcast_estado["enviados"]
+        erros = _broadcast_estado["erros"]
+        print(f"✅ Broadcast finalizado: {total} enviados, {erros} erros")
