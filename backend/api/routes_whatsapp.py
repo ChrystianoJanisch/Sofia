@@ -1,6 +1,7 @@
 import os, json
-from fastapi import APIRouter, Request, Depends
+from fastapi import APIRouter, Request, Depends, Body
 from sqlalchemy.orm import Session
+from sqlalchemy import func, desc
 from db.database import get_db, Lead, Meeting, WppMensagem, normalizar_telefone
 from integrations.whatsapp import _enviar, enviar_dados_institucionais  # type: ignore
 from integrations.daily import criar_sala  # type: ignore
@@ -959,10 +960,138 @@ async def _transcrever_audio(body: dict, data: dict) -> str:
 
 # ── WEBHOOK ───────────────────────────────────────────────────────────────────
 
+WA_VERIFY_TOKEN = os.getenv("WA_VERIFY_TOKEN", "sofia-verify-token")
+
+
+@router.get("/webhook")
+async def whatsapp_verify(request: Request):
+    """Verificação de webhook exigida pela Meta Cloud API."""
+    params = request.query_params
+    mode = params.get("hub.mode", "")
+    token = params.get("hub.verify_token", "")
+    challenge = params.get("hub.challenge", "")
+    if mode == "subscribe" and token == WA_VERIFY_TOKEN:
+        print(f"✅ Webhook verificado pela Meta")
+        from fastapi.responses import PlainTextResponse
+        return PlainTextResponse(challenge)
+    print(f"❌ Verificação falhou — token: {token}")
+    from fastapi.responses import PlainTextResponse
+    return PlainTextResponse("Forbidden", status_code=403)
+
+
+def _extrair_msg_meta(body: dict):
+    """Extrai número e conteúdo de uma mensagem recebida via Meta Cloud API."""
+    try:
+        entry = body.get("entry", [{}])[0]
+        changes = entry.get("changes", [{}])[0]
+        value = changes.get("value", {})
+        messages = value.get("messages", [])
+        if not messages:
+            return None, None, None
+        msg = messages[0]
+        numero = msg.get("from", "")
+        msg_type = msg.get("type", "")
+        texto = ""
+        if msg_type == "text":
+            texto = msg.get("text", {}).get("body", "").strip()
+        elif msg_type == "image":
+            texto = msg.get("image", {}).get("caption", "").strip()
+        elif msg_type == "button":
+            texto = msg.get("button", {}).get("text", "").strip()
+        elif msg_type == "interactive":
+            interactive = msg.get("interactive", {})
+            itype = interactive.get("type", "")
+            if itype == "button_reply":
+                texto = interactive.get("button_reply", {}).get("title", "").strip()
+            elif itype == "list_reply":
+                texto = interactive.get("list_reply", {}).get("title", "").strip()
+        elif msg_type in ("audio", "voice"):
+            texto = ""  # será tratado como áudio
+        return numero, msg_type, texto
+    except Exception as e:
+        print(f"⚠️ Erro ao extrair mensagem Meta: {e}")
+        return None, None, None
+
+
 @router.post("/webhook")
 async def whatsapp_webhook(request: Request, db: Session = Depends(get_db)):
     try:
         body = await request.json()
+
+        # ── META CLOUD API FORMAT ────────────────────────────────────────────
+        if body.get("object") == "whatsapp_business_account":
+            numero_raw, msg_type, texto = _extrair_msg_meta(body)
+            if not numero_raw:
+                return {"ok": True}
+
+            # Statuses (read receipts etc) — ignorar
+            entry = body.get("entry", [{}])[0]
+            changes = entry.get("changes", [{}])[0]
+            value = changes.get("value", {})
+            if value.get("statuses") and not value.get("messages"):
+                return {"ok": True}
+
+            numero = _normalizar_numero(numero_raw)
+
+            # Áudio sem texto — pede para digitar
+            if msg_type in ("audio", "voice") and not texto:
+                print("🎤 Áudio recebido via Meta — sem transcrição local disponível")
+                lead = _buscar_lead_por_numero(numero, db)
+                if lead:
+                    estado = _get_estado(lead, db)
+                    _responder(numero,
+                        "Recebi seu áudio! 🎤 Infelizmente não consigo ouvir áudios ainda. "
+                        "Pode me enviar por texto, por favor?",
+                        lead.id, estado, db)
+                    _save_estado(lead, estado, db)
+                return {"ok": True}
+
+            # Imagem sem legenda
+            if msg_type == "image" and not texto:
+                print("📸 Imagem sem legenda recebida via Meta")
+                lead = _buscar_lead_por_numero(numero, db)
+                if lead:
+                    estado = _get_estado(lead, db)
+                    _responder(numero,
+                        "Recebi sua imagem! 📸 Se precisar me dizer algo, "
+                        "pode enviar por texto que eu consigo entender melhor.",
+                        lead.id, estado, db)
+                    _save_estado(lead, estado, db)
+                return {"ok": True}
+
+            # Tipos sem texto (documento, sticker, vídeo, location, etc)
+            if not texto:
+                print(f"📎 Tipo {msg_type} sem texto — ignorando")
+                return {"ok": True}
+
+            print(f"📱 WhatsApp Meta de {numero}: {texto}")
+
+            lead = _buscar_lead_por_numero(numero, db)
+            if not lead:
+                import uuid
+                lead = Lead(
+                    id=str(uuid.uuid4()),
+                    phone=numero,
+                    name="",
+                    stage="novo",
+                    temperature="pending",
+                    wpp_etapa="aguardando_nome",
+                    wpp_pendente="",
+                    wpp_dia_ref="",
+                    wpp_quer_meet="1",
+                    conversa_estado="[]",
+                )
+                db.add(lead)
+                db.commit()
+                db.refresh(lead)
+                print(f"✨ Novo lead criado: {numero}")
+
+            estado = _get_estado(lead, db)
+            await _processar(texto, numero, lead, estado, db)
+            _save_estado(lead, estado, db)
+            return {"ok": True}
+
+        # ── EVOLUTION API FORMAT (legado / fallback) ─────────────────────────
         if body.get("event","") != "messages.upsert":
             return {"ok": True}
         data   = body.get("data",{})
@@ -971,41 +1100,32 @@ async def whatsapp_webhook(request: Request, db: Session = Depends(get_db)):
         fromMe = data.get("key",{}).get("fromMe", False)
         if fromMe: return {"ok": True}
 
-        # ✅ CORREÇÃO: Detectar tipo de mensagem (texto, áudio, imagem, botão, lista)
         texto  = (msg.get("conversation") or
                   msg.get("extendedTextMessage",{}).get("text","") or "").strip()
 
-        # ── RESPOSTA DE BOTÃO ────────────────────────────────────────────────
         if not texto:
             btn_resp = msg.get("buttonsResponseMessage", {})
             if btn_resp:
                 texto = btn_resp.get("selectedButtonId", "")
-                print(f"🔘 Resposta de botão: {texto}")
 
-        # ── RESPOSTA DE LISTA ────────────────────────────────────────────────
         if not texto:
             list_resp = msg.get("listResponseMessage", {})
             if list_resp:
                 texto = list_resp.get("singleSelectReply", {}).get("selectedRowId", "")
                 if not texto:
                     texto = list_resp.get("title", "")
-                print(f"📋 Resposta de lista: {texto}")
 
-        # ── TEMPLATE BUTTON ──────────────────────────────────────────────────
         if not texto:
             tmpl_resp = msg.get("templateButtonReplyMessage", {})
             if tmpl_resp:
                 texto = tmpl_resp.get("selectedId", "")
-                print(f"🔘 Resposta de template: {texto}")
 
-        # ── ÁUDIO ────────────────────────────────────────────────────────────
         if not texto and (msg.get("audioMessage") or msg.get("pttMessage")):
             print("🎤 Mensagem de áudio recebida — tentando transcrever...")
             texto = await _transcrever_audio(body, data)
             if texto:
                 print(f"🎤 Transcrição: {texto}")
             else:
-                # Não conseguiu transcrever — pede pra digitar
                 numero = jid.replace("@s.whatsapp.net","").replace("@c.us","")
                 numero = _normalizar_numero(numero)
                 lead = _buscar_lead_por_numero(numero, db)
@@ -1018,12 +1138,10 @@ async def whatsapp_webhook(request: Request, db: Session = Depends(get_db)):
                     _save_estado(lead, estado, db)
                 return {"ok": True}
 
-        # ── IMAGEM ───────────────────────────────────────────────────────────
         if not texto and msg.get("imageMessage"):
-            print("📸 Mensagem de imagem recebida")
             caption = msg.get("imageMessage", {}).get("caption", "")
             if caption:
-                texto = caption  # Usa a legenda como texto
+                texto = caption
             else:
                 numero = jid.replace("@s.whatsapp.net","").replace("@c.us","")
                 numero = _normalizar_numero(numero)
@@ -1037,9 +1155,7 @@ async def whatsapp_webhook(request: Request, db: Session = Depends(get_db)):
                     _save_estado(lead, estado, db)
                 return {"ok": True}
 
-        # ── DOCUMENTO / STICKER / VÍDEO ─────────────────────────────────────
         if not texto and (msg.get("documentMessage") or msg.get("stickerMessage") or msg.get("videoMessage")):
-            print("📎 Mídia não suportada recebida (documento/sticker/vídeo)")
             return {"ok": True}
 
         if not texto: return {"ok": True}
@@ -2282,3 +2398,164 @@ async def _processar(texto: str, numero: str, lead, estado: dict, db):
     # ✅ Atualiza CRM a cada 6 mensagens (era 10, agora mais frequente)
     if len(estado["historico"]) % 6 == 0:
         _atualizar_lead_ia(lead, estado["historico"], db)
+
+
+# ── INBOX API ────────────────────────────────────────────────────────────────
+
+@router.get("/inbox/conversas")
+def inbox_conversas(db: Session = Depends(get_db)):
+    """Lista todas as conversas que têm mensagens no WhatsApp."""
+    from sqlalchemy import case
+
+    # Subquery: última mensagem de cada lead
+    ultima_msg = (
+        db.query(
+            WppMensagem.lead_id,
+            func.max(WppMensagem.created_at).label("last_at"),
+            func.count(WppMensagem.id).label("total_msgs"),
+        )
+        .group_by(WppMensagem.lead_id)
+        .subquery()
+    )
+
+    leads_com_msg = (
+        db.query(Lead, ultima_msg.c.last_at, ultima_msg.c.total_msgs)
+        .join(ultima_msg, Lead.id == ultima_msg.c.lead_id)
+        .order_by(desc(ultima_msg.c.last_at))
+        .all()
+    )
+
+    resultado = []
+    for lead, last_at, total in leads_com_msg:
+        # Pega a última mensagem para preview
+        last_msg = (
+            db.query(WppMensagem)
+            .filter(WppMensagem.lead_id == lead.id)
+            .order_by(desc(WppMensagem.created_at))
+            .first()
+        )
+        # Conta msgs não lidas (do user, após a última assistant)
+        ultima_resp = (
+            db.query(func.max(WppMensagem.created_at))
+            .filter(WppMensagem.lead_id == lead.id, WppMensagem.role == "assistant")
+            .scalar()
+        )
+        nao_lidas = 0
+        if ultima_resp:
+            nao_lidas = (
+                db.query(func.count(WppMensagem.id))
+                .filter(
+                    WppMensagem.lead_id == lead.id,
+                    WppMensagem.role == "user",
+                    WppMensagem.created_at > ultima_resp,
+                )
+                .scalar()
+            ) or 0
+        else:
+            nao_lidas = (
+                db.query(func.count(WppMensagem.id))
+                .filter(WppMensagem.lead_id == lead.id, WppMensagem.role == "user")
+                .scalar()
+            ) or 0
+
+        resultado.append({
+            "lead_id": lead.id,
+            "name": lead.name or "",
+            "phone": lead.phone or "",
+            "stage": lead.stage or "",
+            "temperature": lead.temperature or "",
+            "ia_pausada": bool(getattr(lead, "ia_pausada", False)),
+            "especialista_id": lead.especialista_id or "",
+            "last_msg": last_msg.content[:80] if last_msg else "",
+            "last_msg_role": last_msg.role if last_msg else "",
+            "last_at": str(last_at) if last_at else "",
+            "total_msgs": total or 0,
+            "nao_lidas": nao_lidas,
+        })
+
+    return resultado
+
+
+@router.get("/inbox/mensagens/{lead_id}")
+def inbox_mensagens(lead_id: str, db: Session = Depends(get_db)):
+    """Retorna todas as mensagens de um lead."""
+    lead = db.get(Lead, lead_id)
+    if not lead:
+        return {"erro": "Lead não encontrado"}
+
+    msgs = (
+        db.query(WppMensagem)
+        .filter(WppMensagem.lead_id == lead_id)
+        .order_by(WppMensagem.created_at)
+        .all()
+    )
+
+    return {
+        "lead": {
+            "id": lead.id,
+            "name": lead.name or "",
+            "phone": lead.phone or "",
+            "stage": lead.stage or "",
+            "temperature": lead.temperature or "",
+            "product": lead.product or "",
+            "company": getattr(lead, "company", "") or "",
+            "resumo": lead.resumo or "",
+            "ia_pausada": bool(getattr(lead, "ia_pausada", False)),
+            "especialista_id": lead.especialista_id or "",
+        },
+        "mensagens": [
+            {
+                "id": m.id,
+                "role": m.role,
+                "content": m.content,
+                "created_at": str(m.created_at),
+            }
+            for m in msgs
+        ],
+    }
+
+
+@router.post("/inbox/enviar")
+def inbox_enviar(
+    lead_id: str = Body(...),
+    texto: str = Body(...),
+    pausar_ia: bool = Body(True),
+    db: Session = Depends(get_db),
+):
+    """Envia mensagem manual para um lead via WhatsApp e pausa a IA."""
+    lead = db.get(Lead, lead_id)
+    if not lead:
+        return {"erro": "Lead não encontrado"}
+
+    numero = lead.wpp_phone or lead.phone or ""
+    if not numero:
+        return {"erro": "Lead sem telefone"}
+
+    # Envia via WhatsApp
+    _enviar(numero, texto)
+
+    # Salva no histórico
+    msg = WppMensagem(lead_id=lead.id, role="assistant", content=texto)
+    db.add(msg)
+
+    # Pausa IA se solicitado
+    if pausar_ia and not lead.ia_pausada:
+        lead.ia_pausada = True
+
+    db.commit()
+    print(f"💬 Inbox → {lead.name or numero}: {texto[:60]}")
+    return {"mensagem": "Enviada!"}
+
+
+@router.post("/inbox/pausar-ia/{lead_id}")
+def inbox_pausar_ia(lead_id: str, db: Session = Depends(get_db)):
+    """Toggle pausar/ativar IA para um lead."""
+    lead = db.get(Lead, lead_id)
+    if not lead:
+        return {"erro": "Lead não encontrado"}
+    lead.ia_pausada = not lead.ia_pausada
+    if not lead.ia_pausada:
+        lead.especialista_id = ""
+    db.commit()
+    status = "pausada" if lead.ia_pausada else "ativada"
+    return {"mensagem": f"IA {status} para {lead.name or lead.phone}", "ia_pausada": lead.ia_pausada}
