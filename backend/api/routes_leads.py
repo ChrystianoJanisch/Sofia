@@ -265,6 +265,7 @@ async def broadcast_imagem(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     caption: str = Form(""),
+    lead_ids: str = Form(""),
     db: Session = Depends(get_db)
 ):
     if _broadcast_estado["ativo"]:
@@ -283,8 +284,13 @@ async def broadcast_imagem(
     base_url = os.getenv("WEBHOOK_BASE_URL", "https://sofia-ai-production.up.railway.app")
     url_imagem = f"{base_url}/static/img/{nome_arquivo}"
 
-    leads = db.query(Lead).filter(Lead.phone != None, Lead.phone != "").all()
-    telefones = list(set(l.phone for l in leads if l.phone and len(l.phone) >= 8))
+    query = db.query(Lead).filter(Lead.phone != None, Lead.phone != "", Lead.stage != "novo")
+    if lead_ids:
+        ids_list = [i.strip() for i in lead_ids.split(",") if i.strip()]
+        if ids_list:
+            query = query.filter(Lead.id.in_(ids_list))
+    leads_found = query.all()
+    telefones = list(set(l.phone for l in leads_found if l.phone and len(l.phone) >= 8))
 
     if not telefones:
         return {"erro": "Nenhum lead com telefone encontrado"}
