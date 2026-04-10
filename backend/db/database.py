@@ -138,6 +138,8 @@ class WppMensagem(Base):
     lead_id    = Column(String, ForeignKey("leads.id"), nullable=False)
     role       = Column(String, nullable=False)
     content    = Column(Text,   nullable=False)
+    wamid      = Column(String, default="")       # ID da mensagem na Meta (wamid.xxx)
+    status     = Column(String, default="sent")    # sent, delivered, read
     created_at = Column(DateTime, default=datetime.utcnow)
 
     lead       = relationship("Lead", back_populates="wpp_mensagens")
@@ -442,6 +444,8 @@ def _migrar_colunas():
         "ALTER TABLE meetings ADD COLUMN IF NOT EXISTS lembrete_enviado BOOLEAN DEFAULT FALSE",
         "ALTER TABLE meetings ADD COLUMN IF NOT EXISTS transcript TEXT DEFAULT ''",
         "CREATE TABLE IF NOT EXISTS wpp_mensagens (id VARCHAR PRIMARY KEY, lead_id VARCHAR NOT NULL REFERENCES leads(id), role VARCHAR NOT NULL, content TEXT NOT NULL, created_at TIMESTAMP DEFAULT NOW())",
+        "ALTER TABLE wpp_mensagens ADD COLUMN IF NOT EXISTS wamid VARCHAR DEFAULT ''",
+        "ALTER TABLE wpp_mensagens ADD COLUMN IF NOT EXISTS status VARCHAR DEFAULT 'sent'",
         "CREATE TABLE IF NOT EXISTS users (id VARCHAR PRIMARY KEY, email VARCHAR UNIQUE NOT NULL, password_hash VARCHAR NOT NULL, name VARCHAR DEFAULT '', role VARCHAR DEFAULT 'funcionario', active BOOLEAN DEFAULT TRUE, created_at TIMESTAMP DEFAULT NOW(), updated_at TIMESTAMP DEFAULT NOW())",
         "CREATE TABLE IF NOT EXISTS call_insights (id VARCHAR PRIMARY KEY, call_id VARCHAR REFERENCES call_sessions(id), lead_id VARCHAR REFERENCES leads(id), approach_used VARCHAR DEFAULT '', opening_style VARCHAR DEFAULT '', objection_handled TEXT DEFAULT '', outcome VARCHAR DEFAULT '', temperature VARCHAR DEFAULT '', duration_sec INTEGER DEFAULT 0, what_worked TEXT DEFAULT '', what_failed TEXT DEFAULT '', suggestion TEXT DEFAULT '', client_engagement FLOAT DEFAULT 0, sentiment_score FLOAT DEFAULT 0, created_at TIMESTAMP DEFAULT NOW())",
         "CREATE TABLE IF NOT EXISTS ab_tests (id VARCHAR PRIMARY KEY, name VARCHAR NOT NULL, description TEXT DEFAULT '', variant_a_name VARCHAR DEFAULT 'A', variant_a_config TEXT DEFAULT '{}', variant_b_name VARCHAR DEFAULT 'B', variant_b_config TEXT DEFAULT '{}', metric VARCHAR DEFAULT 'conversion_rate', status VARCHAR DEFAULT 'active', total_a INTEGER DEFAULT 0, total_b INTEGER DEFAULT 0, conversions_a INTEGER DEFAULT 0, conversions_b INTEGER DEFAULT 0, winner VARCHAR DEFAULT '', confidence FLOAT DEFAULT 0, created_at TIMESTAMP DEFAULT NOW(), completed_at TIMESTAMP)",

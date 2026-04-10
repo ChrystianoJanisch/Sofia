@@ -22,11 +22,11 @@ def _formatar_numero(phone: str) -> str:
     return digitos
 
 
-def _enviar(numero: str, mensagem: str):
-    """Envia mensagem de texto simples via Meta Cloud API."""
+def _enviar(numero: str, mensagem: str) -> str:
+    """Envia mensagem de texto simples via Meta Cloud API. Retorna wamid."""
     if not WA_PHONE_NUMBER_ID or not WA_ACCESS_TOKEN:
         print(f"⚠️ WhatsApp não configurado — pulando envio para {numero}")
-        return
+        return ""
 
     payload = {
         "messaging_product": "whatsapp",
@@ -39,11 +39,19 @@ def _enviar(numero: str, mensagem: str):
     try:
         res = requests.post(BASE_URL, json=payload, headers=HEADERS, timeout=10)
         if res.status_code in (200, 201):
-            print(f"✅ WhatsApp enviado para {numero}")
+            data = res.json()
+            wamid = ""
+            messages = data.get("messages", [])
+            if messages:
+                wamid = messages[0].get("id", "")
+            print(f"✅ WhatsApp enviado para {numero} (wamid: {wamid[:20]})")
+            return wamid
         else:
             print(f"❌ Erro WhatsApp {res.status_code}: {res.text}")
+            return ""
     except Exception as e:
         print(f"❌ Erro ao enviar WhatsApp: {e}")
+        return ""
 
 
 def enviar_whatsapp(phone: str, nome: str, mensagem: str = None):

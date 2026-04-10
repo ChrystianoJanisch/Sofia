@@ -171,9 +171,9 @@ def _get_estado(lead, db: Session) -> dict:
     }
 
 
-def _salvar_msg(lead_id: str, role: str, content: str, db: Session):
+def _salvar_msg(lead_id: str, role: str, content: str, db: Session, wamid: str = ""):
     """Persiste uma única mensagem na tabela wpp_mensagens."""
-    msg = WppMensagem(lead_id=lead_id, role=role, content=content)
+    msg = WppMensagem(lead_id=lead_id, role=role, content=content, wamid=wamid, status="sent" if role == "assistant" else "")
     db.add(msg)
     db.commit()
 
@@ -202,8 +202,8 @@ def _responder(numero: str, conteudo: str, lead_id: str, estado: dict, db: Sessi
     Envia mensagem WhatsApp, salva no banco e atualiza histórico em memória.
     Único ponto de saída — garante que TUDO que a IA envia fica registrado.
     """
-    _enviar(numero, conteudo)
-    _salvar_msg(lead_id, "assistant", conteudo, db)
+    wamid = _enviar(numero, conteudo) or ""
+    _salvar_msg(lead_id, "assistant", conteudo, db, wamid=wamid)
     estado["historico"].append({"role": "assistant", "content": conteudo})
 
 
@@ -1024,11 +1024,19 @@ async def whatsapp_webhook(request: Request, db: Session = Depends(get_db)):
             if not numero_raw:
                 return {"ok": True}
 
-            # Statuses (read receipts etc) — ignorar
+            # Statuses (sent/delivered/read)
             entry = body.get("entry", [{}])[0]
             changes = entry.get("changes", [{}])[0]
             value = changes.get("value", {})
             if value.get("statuses") and not value.get("messages"):
+                for st in value.get("statuses", []):
+                    wamid = st.get("id", "")
+                    new_status = st.get("status", "")  # sent, delivered, read, failed
+                    if wamid and new_status in ("sent", "delivered", "read"):
+                        msg = db.query(WppMensagem).filter(WppMensagem.wamid == wamid).first()
+                        if msg:
+                            msg.status = new_status
+                            db.commit()
                 return {"ok": True}
 
             numero = _normalizar_numero(numero_raw)
@@ -2508,6 +2516,7 @@ def inbox_mensagens(lead_id: str, db: Session = Depends(get_db)):
                 "id": m.id,
                 "role": m.role,
                 "content": m.content,
+                "status": getattr(m, "status", "") or "",
                 "created_at": str(m.created_at),
             }
             for m in msgs
@@ -2532,10 +2541,10 @@ def inbox_enviar(
         return {"erro": "Lead sem telefone"}
 
     # Envia via WhatsApp
-    _enviar(numero, texto)
+    wamid = _enviar(numero, texto) or ""
 
     # Salva no histórico
-    msg = WppMensagem(lead_id=lead.id, role="assistant", content=texto)
+    msg = WppMensagem(lead_id=lead.id, role="assistant", content=texto, wamid=wamid, status="sent")
     db.add(msg)
 
     # Pausa IA se solicitado
