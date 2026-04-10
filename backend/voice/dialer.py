@@ -46,6 +46,9 @@ def fazer_ligacao(phone: str, nome: str = "", empresa: str = "", cnpj: str = "")
         "agent_id": ELEVENLABS_AGENT_ID,
         "agent_phone_number_id": ELEVENLABS_PHONE_NUMBER_ID,
         "to_number": numero,
+        "telephony_call_config": {
+            "ringing_timeout_secs": 15,
+        },
         "conversation_initiation_client_data": {
             "dynamic_variables": {
                 "nome_cliente": nome or "cliente",
