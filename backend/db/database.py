@@ -296,7 +296,7 @@ def init_db():
 
 def _limpar_leads_ligando():
     """
-    ✅ SAFETY NET: Leads que ficaram em "ligando" por mais de 2 minutos
+    ✅ SAFETY NET: Leads que ficaram em "ligando" por mais de 1 minuto
     provavelmente tiveram falha no webhook pós-chamada (SIP 503, canceled, etc).
     Marca como nao_atendeu e envia WhatsApp de follow-up.
     """
@@ -304,7 +304,7 @@ def _limpar_leads_ligando():
     try:
         from datetime import timedelta
         from integrations.whatsapp import enviar_whatsapp
-        limite = datetime.utcnow() - timedelta(minutes=2)
+        limite = datetime.utcnow() - timedelta(minutes=1)
         presos = db.query(Lead).filter(
             Lead.stage == "ligando",
             Lead.last_call_at < limite

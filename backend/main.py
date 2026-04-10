@@ -54,7 +54,7 @@ async def _loop_limpar_ligando():
     import asyncio
     from db.database import _limpar_leads_ligando
     while True:
-        await asyncio.sleep(120)
+        await asyncio.sleep(60)
         try:
             _limpar_leads_ligando()
         except Exception as e:
