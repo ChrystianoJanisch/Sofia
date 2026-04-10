@@ -296,21 +296,45 @@ def init_db():
 
 def _limpar_leads_ligando():
     """
-    ✅ SAFETY NET: Leads que ficaram em "ligando" por mais de 5 minutos
-    provavelmente tiveram falha no webhook pós-chamada (SIP 503, etc).
-    Volta pro stage anterior (nao_atendeu) pra não ficarem presos.
+    ✅ SAFETY NET: Leads que ficaram em "ligando" por mais de 2 minutos
+    provavelmente tiveram falha no webhook pós-chamada (SIP 503, canceled, etc).
+    Marca como nao_atendeu e envia WhatsApp de follow-up.
     """
     db = SessionLocal()
     try:
         from datetime import timedelta
-        limite = datetime.utcnow() - timedelta(minutes=5)
+        from integrations.whatsapp import enviar_whatsapp
+        limite = datetime.utcnow() - timedelta(minutes=2)
         presos = db.query(Lead).filter(
             Lead.stage == "ligando",
             Lead.last_call_at < limite
         ).all()
         for lead in presos:
-            print(f"⚠️ Lead preso em 'ligando': {lead.name} ({lead.phone}) — voltando para 'nao_atendeu'")
+            print(f"⚠️ Lead preso em 'ligando': {lead.name} ({lead.phone}) — tratando como nao_atendeu")
             lead.stage = "nao_atendeu"
+            lead.wpp_etapa = "pos_ligacao"
+
+            # Envia WhatsApp na primeira tentativa
+            if lead.call_attempts <= 1:
+                from integrations.whatsapp import IA_NAME, EMPRESA_NOME, _formatar_numero
+                nome = lead.name or "tudo bem"
+                msg = (
+                    f"Olá {nome}! 👋\n\n"
+                    f"Aqui é a {IA_NAME} da {EMPRESA_NOME}. "
+                    f"Tentei te ligar agora mas não consegui falar com você.\n\n"
+                    f"Temos condições especiais de crédito com acesso a mais de 60 "
+                    f"instituições financeiras. Quando tiver um momento, me responda "
+                    f"aqui e posso te apresentar as opções! 😊"
+                )
+                wpp_msg = WppMensagem(lead_id=lead.id, role="assistant", content=msg)
+                db.add(wpp_msg)
+                numero = lead.wpp_phone or lead.phone or ""
+                try:
+                    enviar_whatsapp(numero, lead.name, mensagem=msg)
+                    print(f"📱 WhatsApp follow-up enviado para {lead.name}")
+                except Exception as e:
+                    print(f"⚠️ Erro ao enviar WhatsApp follow-up: {e}")
+
         if presos:
             db.commit()
             print(f"✅ {len(presos)} leads destravados de 'ligando'")

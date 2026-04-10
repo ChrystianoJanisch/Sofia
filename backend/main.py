@@ -49,6 +49,18 @@ app.include_router(daily_webhook_router, prefix="/api/daily", tags=["Daily.co"])
 app.include_router(analytics_router, prefix="/api/analytics", tags=["Analytics"])
 
 
+async def _loop_limpar_ligando():
+    """Loop que roda a cada 2 min para destravar leads presos em 'ligando'."""
+    import asyncio
+    from db.database import _limpar_leads_ligando
+    while True:
+        await asyncio.sleep(120)
+        try:
+            _limpar_leads_ligando()
+        except Exception as e:
+            print(f"⚠️ Erro no loop limpar_ligando: {e}")
+
+
 @app.on_event("startup")
 async def startup():
     init_db()
@@ -56,6 +68,7 @@ async def startup():
     import asyncio
     asyncio.create_task(executar_callbacks())
     asyncio.create_task(executar_followups())
+    asyncio.create_task(_loop_limpar_ligando())
     print("🚀 Sofia v6.2 — Auth + Agenda + WhatsApp + Callbacks + Analytics — Pronta!")
 
 
