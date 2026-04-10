@@ -19,14 +19,14 @@ def _get_wpp_phone(lead) -> str:
     return lead.wpp_phone if lead.wpp_phone and lead.wpp_phone.strip() else lead.phone
 
 
-def _enviar_lembrete(lead, meeting):
-    """Envia lembrete de reunião via WhatsApp."""
+def _enviar_lembrete(lead, meeting, db):
+    """Envia lembrete de reunião via WhatsApp e salva no inbox."""
     from integrations.whatsapp import enviar_whatsapp
+    from db.database import WppMensagem
 
     nome = lead.name or "Cliente"
     hora = ""
     try:
-        # scheduled_at pode ser "2026-03-09 14:00" ou ISO
         if " " in meeting.scheduled_at:
             hora = meeting.scheduled_at.split(" ")[1][:5]
         else:
@@ -51,6 +51,10 @@ def _enviar_lembrete(lead, meeting):
     numero = _get_wpp_phone(lead)
     try:
         enviar_whatsapp(numero, nome, mensagem=msg)
+        # Salva no inbox
+        wpp_msg = WppMensagem(lead_id=lead.id, role="assistant", content=msg)
+        db.add(wpp_msg)
+        db.commit()
         print(f"🔔 Lembrete enviado para {nome} ({numero}) — reunião às {hora}")
         return True
     except Exception as e:
@@ -82,7 +86,7 @@ async def verificar_lembretes():
             if not lead:
                 continue
 
-            sucesso = _enviar_lembrete(lead, meeting)
+            sucesso = _enviar_lembrete(lead, meeting, db)
             if sucesso:
                 meeting.lembrete_enviado = True
                 db.commit()
