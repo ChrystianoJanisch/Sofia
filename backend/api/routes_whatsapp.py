@@ -1020,11 +1020,7 @@ async def whatsapp_webhook(request: Request, db: Session = Depends(get_db)):
 
         # ── META CLOUD API FORMAT ────────────────────────────────────────────
         if body.get("object") == "whatsapp_business_account":
-            numero_raw, msg_type, texto = _extrair_msg_meta(body)
-            if not numero_raw:
-                return {"ok": True}
-
-            # Statuses (sent/delivered/read)
+            # Statuses (sent/delivered/read) — processar ANTES de extrair mensagem
             entry = body.get("entry", [{}])[0]
             changes = entry.get("changes", [{}])[0]
             value = changes.get("value", {})
@@ -1041,6 +1037,11 @@ async def whatsapp_webhook(request: Request, db: Session = Depends(get_db)):
                             print(f"   ✅ Atualizado para {new_status}")
                         else:
                             print(f"   ⚠️ Mensagem não encontrada no banco")
+                return {"ok": True}
+
+            # Extrair mensagem
+            numero_raw, msg_type, texto = _extrair_msg_meta(body)
+            if not numero_raw:
                 return {"ok": True}
 
             numero = _normalizar_numero(numero_raw)
