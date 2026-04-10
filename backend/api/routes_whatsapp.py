@@ -1032,11 +1032,15 @@ async def whatsapp_webhook(request: Request, db: Session = Depends(get_db)):
                 for st in value.get("statuses", []):
                     wamid = st.get("id", "")
                     new_status = st.get("status", "")  # sent, delivered, read, failed
+                    print(f"📨 Status webhook: {new_status} para wamid={wamid[:30]}")
                     if wamid and new_status in ("sent", "delivered", "read"):
                         msg = db.query(WppMensagem).filter(WppMensagem.wamid == wamid).first()
                         if msg:
                             msg.status = new_status
                             db.commit()
+                            print(f"   ✅ Atualizado para {new_status}")
+                        else:
+                            print(f"   ⚠️ Mensagem não encontrada no banco")
                 return {"ok": True}
 
             numero = _normalizar_numero(numero_raw)
