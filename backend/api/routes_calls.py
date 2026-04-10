@@ -268,11 +268,13 @@ def _tratar_nao_atendeu(lead, db: Session):
             ensure_ascii=False
         )
 
-    db.commit()
+        db.commit()
 
-    # ✅ Envia a MESMA mensagem que foi salva no banco
-    numero_wpp = _get_wpp_phone(lead)
-    enviar_whatsapp(numero_wpp, lead.name, mensagem=msg_inicial)
+        # Envia a MESMA mensagem que foi salva no banco
+        numero_wpp = _get_wpp_phone(lead)
+        enviar_whatsapp(numero_wpp, lead.name, mensagem=msg_inicial)
+    else:
+        db.commit()
 
 
 class LigarPayload(BaseModel):
