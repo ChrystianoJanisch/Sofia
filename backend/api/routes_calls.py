@@ -313,8 +313,11 @@ def ligar(dados: LigarPayload, db: Session = Depends(get_db)):
         try:
             conversation_id = fazer_ligacao(lead.phone, lead.name or "", lead.company or "", lead.cnpj or "")
         except Exception as e:
-            print(f"❌ Erro ao ligar para {lead.name}: {e}")
-            return {"erro": f"Falha na ligação: {str(e)}"}
+            print(f"❌ Erro ao ligar para {lead.name}: {e} — tratando como não atendeu")
+            lead.call_attempts += 1
+            lead.last_call_at  = datetime.utcnow()
+            _tratar_nao_atendeu(lead, db)
+            return {"erro": f"Ligação falhou, WhatsApp de follow-up enviado"}
 
         lead.stage         = "ligando"
         lead.call_attempts += 1
@@ -445,7 +448,10 @@ async def _executar_lote(lead_ids: list, intervalo: int):
                 db.commit()
                 _lote_estado["processados"] += 1
             except Exception as e:
-                print(f"   ❌ Erro: {e}")
+                print(f"   ❌ Erro ao ligar: {e} — tratando como não atendeu")
+                lead.call_attempts += 1
+                lead.last_call_at  = datetime.utcnow()
+                _tratar_nao_atendeu(lead, db)
                 _lote_estado["processados"] += 1
             if i < len(lead_ids) - 1:
                 await asyncio.sleep(intervalo)

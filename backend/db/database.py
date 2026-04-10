@@ -296,14 +296,14 @@ def init_db():
 
 def _limpar_leads_ligando():
     """
-    ✅ SAFETY NET: Leads que ficaram em "ligando" por mais de 30 minutos
-    provavelmente tiveram falha no webhook pós-chamada.
+    ✅ SAFETY NET: Leads que ficaram em "ligando" por mais de 5 minutos
+    provavelmente tiveram falha no webhook pós-chamada (SIP 503, etc).
     Volta pro stage anterior (nao_atendeu) pra não ficarem presos.
     """
     db = SessionLocal()
     try:
         from datetime import timedelta
-        limite = datetime.utcnow() - timedelta(minutes=30)
+        limite = datetime.utcnow() - timedelta(minutes=5)
         presos = db.query(Lead).filter(
             Lead.stage == "ligando",
             Lead.last_call_at < limite
