@@ -494,7 +494,7 @@ async def pos_chamada(request: Request, db: Session = Depends(get_db)):
         return {"ok": True, "aviso": "Lead não encontrado"}
 
     # ── NÃO ATENDEU ──────────────────────────────────────────────────────
-    if duracao < 15 or status in ("no-answer", "busy", "failed"):
+    if duracao < 15 or status in ("no-answer", "busy", "failed", "canceled"):
         _tratar_nao_atendeu(lead, db)
         print(f"📵 {lead.name} não atendeu ({duracao}s / status: {status})")
         return {"ok": True, "acao": "nao_atendeu"}
