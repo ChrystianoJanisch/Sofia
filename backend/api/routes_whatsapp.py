@@ -1024,6 +1024,14 @@ async def whatsapp_webhook(request: Request, db: Session = Depends(get_db)):
             entry = body.get("entry", [{}])[0]
             changes = entry.get("changes", [{}])[0]
             value = changes.get("value", {})
+
+            # ✅ Filtro por phone_number_id — evita receber msgs de outro número da mesma WABA
+            phone_id_webhook = value.get("metadata", {}).get("phone_number_id", "")
+            phone_id_esperado = os.getenv("WA_PHONE_NUMBER_ID", "")
+            if phone_id_esperado and phone_id_webhook and phone_id_webhook != phone_id_esperado:
+                print(f"🚫 Webhook ignorado — phone_number_id {phone_id_webhook} não é deste projeto ({phone_id_esperado})")
+                return {"ok": True}
+
             if value.get("statuses") and not value.get("messages"):
                 for st in value.get("statuses", []):
                     wamid = st.get("id", "")
