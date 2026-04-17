@@ -452,6 +452,11 @@
             border-color: rgba(245, 158, 11, .3)
         }
 
+        .badge-mensagem_enviada {
+            color: #a78bfa;
+            border-color: rgba(167, 139, 250, .3)
+        }
+
         .badge-sem_interesse,
         .badge.concluido {
             color: var(--gray-dim);
@@ -931,6 +936,7 @@
                 <button class="btn btn-outline master-only"
                     onclick="document.getElementById('csvInput').click()">CSV</button>
                 <input type="file" id="csvInput" accept=".csv" style="display:none" onchange="importarCSV(event)">
+        <button class="btn btn-outline master-only" onclick="abrirFirstMessage()" style="background:rgba(167,139,250,0.15);border-color:#a78bfa;color:#a78bfa">✉ 1ª MSG</button>
         <button class="btn btn-outline master-only" onclick="abrirBroadcast()" style="background:rgba(37,211,102,0.15);border-color:#25d366;color:#25d366">📢 BROADCAST</button>
                 <button class="btn btn-gold master-only" onclick="abrirModalNovo()">+ LEAD</button>
                 <button class="btn btn-danger master-only" id="btn-del-sel" style="display:none"
@@ -1042,6 +1048,40 @@
             <div id="lista-todas"></div>
         </div>
     </div>
+  <!-- MODAL 1ª MENSAGEM (TEMPLATE WHATSAPP) -->
+  <div class="modal-overlay" id="modal-first-msg">
+    <div class="modal" style="max-width:600px">
+      <button class="modal-close" onclick="fecharFirstMessage()">✕</button>
+      <h2>1ª Mensagem WhatsApp</h2>
+      <p id="fm-count" style="color:#a78bfa;font-size:13px;margin-bottom:8px">Carregando leads elegíveis...</p>
+      <p style="color:var(--gray-dim);font-size:12px;margin-bottom:16px">Envia um template aprovado do Meta para todos os leads com stage <b>Novo</b>.</p>
+
+      <div class="field">
+        <label>Template aprovado</label>
+        <select id="fm-template" onchange="fmOnTemplateChange()" style="width:100%;background:var(--black-1);color:#fff;border:1px solid var(--gold-border);border-radius:8px;padding:10px;font-size:13px">
+          <option value="">Carregando...</option>
+        </select>
+      </div>
+
+      <div id="fm-vars-wrap" class="field" style="display:none">
+        <label>Mapeamento de variáveis</label>
+        <div id="fm-vars" style="display:flex;flex-direction:column;gap:8px"></div>
+      </div>
+
+      <div class="field">
+        <label>Preview</label>
+        <div id="fm-preview" style="background:var(--black-1);padding:12px;border-radius:8px;border:1px solid var(--gold-border);font-size:13px;color:#ddd;min-height:60px;white-space:pre-wrap">Selecione um template</div>
+      </div>
+
+      <div id="fm-status" style="display:none;font-size:12px;color:#a78bfa;margin-bottom:12px"></div>
+
+      <div style="display:flex;gap:10px;justify-content:flex-end">
+        <button class="btn btn-outline" onclick="fecharFirstMessage()">CANCELAR</button>
+        <button class="btn btn-gold" id="fm-enviar" onclick="enviarFirstMessage()" disabled style="background:#a78bfa;border-color:#a78bfa;color:#000">ENVIAR</button>
+      </div>
+    </div>
+  </div>
+
   <div class="modal-overlay" id="modal-broadcast">
     <div class="modal" style="max-width:500px">
       <button class="modal-close" onclick="fecharBroadcast()">✕</button>
@@ -1080,6 +1120,7 @@
             <div class="field"><label>E-mail</label><input id="ml-email" placeholder="email@ex.com" type="email"></div>
             <div class="field" id="ml-stage-f" style="display:none"><label>Stage</label><select id="ml-stage">
                     <option>novo</option>
+                    <option>mensagem_enviada</option>
                     <option>ligando</option>
                     <option>atendeu</option>
                     <option>interessado</option>
@@ -1308,6 +1349,141 @@
     function enviarBroadcast() { var file = document.getElementById('bc-file').files[0]; var caption = document.getElementById('bc-caption').value.trim(); if (!file) { toast('Selecione uma imagem', 'error'); return } var sels = document.querySelectorAll('.lead-check:checked'); var ids = []; sels.forEach(function (c) { ids.push(c.dataset.id) }); var label = ids.length > 0 ? ids.length + ' selecionados' : 'todos os leads (exceto novos)'; if (!confirm('Enviar imagem para ' + label + ' via WhatsApp?')) return; var fd = new FormData(); fd.append('file', file); fd.append('caption', caption); if (ids.length > 0) fd.append('lead_ids', ids.join(',')); document.getElementById('bc-enviar').disabled = true; document.getElementById('bc-enviar').textContent = 'ENVIANDO...'; authFetch(API() + '/api/leads/broadcast', { method: 'POST', body: fd }).then(function (r) { return r.json() }).then(function (d) { if (d.erro) { toast(d.erro, 'error'); document.getElementById('bc-enviar').disabled = false; document.getElementById('bc-enviar').textContent = 'ENVIAR PARA TODOS'; return } toast(d.mensagem, 'success'); document.getElementById('bc-status').style.display = ''; _bcInterval = setInterval(atualizarBcStatus, 3000) }).catch(function (e) { toast('Erro: ' + e.message, 'error'); document.getElementById('bc-enviar').disabled = false; document.getElementById('bc-enviar').textContent = 'ENVIAR PARA TODOS' }) }
     var _bcInterval = null;
     function atualizarBcStatus() { authFetch(API() + '/api/leads/broadcast/status').then(function (r) { return r.json() }).then(function (d) { var el = document.getElementById('bc-status'); el.style.display = ''; el.textContent = (d.ativo ? 'Enviando' : 'Finalizado') + ' — ' + d.enviados + '/' + d.total + ' enviados' + (d.erros > 0 ? ', ' + d.erros + ' erros' : ''); if (!d.ativo) { clearInterval(_bcInterval); _bcInterval = null; document.getElementById('bc-enviar').disabled = false; document.getElementById('bc-enviar').textContent = 'ENVIAR PARA TODOS' } }).catch(function () {}) }
+
+    // ── 1ª MENSAGEM WHATSAPP (TEMPLATE) ──────────────────────────────────
+    var fmTemplates = [], fmSelected = null, _fmInterval = null;
+    var FM_FIELD_OPTIONS = [
+        { v: 'name', l: 'Nome do lead' },
+        { v: 'company', l: 'Empresa' },
+        { v: 'phone', l: 'Telefone' },
+        { v: 'cnpj', l: 'CNPJ' },
+        { v: 'email', l: 'E-mail' },
+        { v: 'product', l: 'Produto' },
+        { v: 'custom', l: 'Texto fixo...' }
+    ];
+    function abrirFirstMessage() {
+        document.getElementById('modal-first-msg').classList.add('open');
+        document.getElementById('fm-enviar').disabled = true;
+        document.getElementById('fm-enviar').textContent = 'ENVIAR';
+        document.getElementById('fm-status').style.display = 'none';
+        // Conta leads elegíveis
+        var novos = leads.filter(function(l){ return l.stage === 'novo' && l.phone }).length;
+        document.getElementById('fm-count').innerHTML = '<b>' + novos + '</b> leads com stage "Novo" serão contatados.';
+        // Carrega templates
+        fmLoadTemplates();
+    }
+    function fecharFirstMessage() { document.getElementById('modal-first-msg').classList.remove('open') }
+    function fmLoadTemplates() {
+        var sel = document.getElementById('fm-template');
+        sel.innerHTML = '<option value="">Carregando...</option>';
+        authFetch(API() + '/api/whatsapp/templates').then(function(r){return r.json()}).then(function(d){
+            if (d.erro) { sel.innerHTML = '<option value="">Erro: ' + d.erro + '</option>'; return }
+            fmTemplates = d;
+            if (!d.length) { sel.innerHTML = '<option value="">Nenhum template aprovado</option>'; return }
+            sel.innerHTML = '<option value="">Selecione um template</option>' + d.map(function(t){
+                return '<option value="' + esc(t.name) + '">' + esc(t.name) + ' (' + (t.variables || []).length + ' vars)</option>';
+            }).join('');
+        }).catch(function(e){ sel.innerHTML = '<option value="">Erro ao carregar</option>' });
+    }
+    function fmOnTemplateChange() {
+        var name = document.getElementById('fm-template').value;
+        fmSelected = fmTemplates.find(function(t){ return t.name === name }) || null;
+        var wrap = document.getElementById('fm-vars-wrap');
+        var varsEl = document.getElementById('fm-vars');
+        if (!fmSelected) {
+            wrap.style.display = 'none';
+            document.getElementById('fm-preview').textContent = 'Selecione um template';
+            document.getElementById('fm-enviar').disabled = true;
+            return;
+        }
+        var vars = fmSelected.variables || [];
+        if (vars.length === 0) {
+            wrap.style.display = 'none';
+        } else {
+            wrap.style.display = '';
+            varsEl.innerHTML = vars.map(function(v){
+                var sel = '<select class="fm-var-sel" data-idx="' + v.index + '" onchange="fmUpdatePreview()" style="background:var(--black-1);color:#fff;border:1px solid var(--gold-border);border-radius:6px;padding:6px;font-size:12px;flex:1">' +
+                    FM_FIELD_OPTIONS.map(function(o){ return '<option value="' + o.v + '">' + o.l + '</option>' }).join('') +
+                '</select>';
+                var custom = '<input class="fm-var-custom" data-idx="' + v.index + '" placeholder="Texto fixo" style="display:none;flex:1;background:var(--black-1);color:#fff;border:1px solid var(--gold-border);border-radius:6px;padding:6px;font-size:12px" oninput="fmUpdatePreview()">';
+                return '<div style="display:flex;gap:6px;align-items:center"><span style="font-family:monospace;color:var(--gold);min-width:30px">{{' + v.index + '}}</span>' + sel + custom + '</div>';
+            }).join('');
+            // Listener pra trocar entre select de campo e input de custom
+            varsEl.querySelectorAll('.fm-var-sel').forEach(function(s){
+                s.addEventListener('change', function(){
+                    var idx = s.dataset.idx;
+                    var customInput = varsEl.querySelector('.fm-var-custom[data-idx="' + idx + '"]');
+                    if (s.value === 'custom') { customInput.style.display = '' } else { customInput.style.display = 'none' }
+                    fmUpdatePreview();
+                });
+            });
+        }
+        fmUpdatePreview();
+        document.getElementById('fm-enviar').disabled = false;
+    }
+    function fmGetMapping() {
+        var mapping = {};
+        if (!fmSelected) return mapping;
+        document.querySelectorAll('.fm-var-sel').forEach(function(s){
+            var idx = s.dataset.idx;
+            if (s.value === 'custom') {
+                var input = document.querySelector('.fm-var-custom[data-idx="' + idx + '"]');
+                mapping[idx] = 'custom:' + (input ? input.value : '');
+            } else {
+                mapping[idx] = s.value;
+            }
+        });
+        return mapping;
+    }
+    function fmUpdatePreview() {
+        if (!fmSelected) return;
+        var mapping = fmGetMapping();
+        var sampleLead = leads.find(function(l){ return l.stage === 'novo' && l.phone }) || leads[0] || {};
+        var text = fmSelected.body_text || '';
+        text = text.replace(/\{\{(\d+)\}\}/g, function(_, idx){
+            var src = mapping[idx] || '';
+            if (src.indexOf('custom:') === 0) return src.substring(7) || ('{{' + idx + '}}');
+            if (src === 'name') return sampleLead.name || '[nome]';
+            if (src === 'company') return sampleLead.company || '[empresa]';
+            if (src === 'phone') return sampleLead.phone || '[telefone]';
+            if (src === 'cnpj') return sampleLead.cnpj || '[cnpj]';
+            if (src === 'email') return sampleLead.email || '[email]';
+            if (src === 'product') return sampleLead.product || '[produto]';
+            return '{{' + idx + '}}';
+        });
+        document.getElementById('fm-preview').textContent = text;
+    }
+    function enviarFirstMessage() {
+        if (!fmSelected) { toast('Selecione um template', 'error'); return }
+        var mapping = fmGetMapping();
+        var novos = leads.filter(function(l){ return l.stage === 'novo' && l.phone }).length;
+        if (novos === 0) { toast('Nenhum lead com stage Novo', 'error'); return }
+        if (!confirm('Enviar template "' + fmSelected.name + '" para ' + novos + ' leads?')) return;
+        var btn = document.getElementById('fm-enviar');
+        btn.disabled = true; btn.textContent = 'ENVIANDO...';
+        authFetch(API() + '/api/leads/first-message', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ template_name: fmSelected.name, language_code: fmSelected.language || 'pt_BR', variable_mapping: mapping })
+        }).then(function(r){return r.json()}).then(function(d){
+            if (d.erro) { toast(d.erro, 'error'); btn.disabled = false; btn.textContent = 'ENVIAR'; return }
+            toast(d.mensagem, 'success');
+            document.getElementById('fm-status').style.display = '';
+            _fmInterval = setInterval(fmAtualizarStatus, 3000);
+        }).catch(function(e){ toast('Erro: ' + e.message, 'error'); btn.disabled = false; btn.textContent = 'ENVIAR' });
+    }
+    function fmAtualizarStatus() {
+        authFetch(API() + '/api/leads/first-message/status').then(function(r){return r.json()}).then(function(d){
+            var el = document.getElementById('fm-status');
+            el.textContent = (d.ativo ? 'Enviando' : 'Finalizado') + ' — ' + d.enviados + '/' + d.total + (d.erros > 0 ? ' (' + d.erros + ' erros)' : '');
+            if (!d.ativo) {
+                clearInterval(_fmInterval); _fmInterval = null;
+                document.getElementById('fm-enviar').disabled = false;
+                document.getElementById('fm-enviar').textContent = 'ENVIAR';
+                loadLeads();
+            }
+        }).catch(function(){})
+    }
         function importarCSV(ev) { var f = ev.target.files[0]; if (!f) return; var fd = new FormData(); fd.append('file', f); authFetch(API() + '/api/leads/importar-csv', { method: 'POST', body: fd }).then(function (r) { return r.json() }).then(function (d) { toast((d.importados || 0) + ' importados', 'success'); loadLeads() }).catch(function (e) { toast('Erro: ' + e.message, 'error') }); ev.target.value = '' }
         function deletarLead(id, nm) { if (!confirm('Remover ' + nm + '?')) return; authFetch(API() + '/api/leads/' + id, { method: 'DELETE' }).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json() }).then(function () { toast(nm + ' removido', 'success'); loadLeads() }).catch(function (e) { toast('Erro: ' + e.message, 'error') }) }
         function toggleIA(id) { authFetch(API() + '/api/leads/' + id + '/pausar-ia', { method: 'POST' }).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json() }).then(function (d) { toast(d.mensagem, 'success'); loadLeads() }).catch(function (e) { toast('Erro: ' + e.message, 'error') }) }

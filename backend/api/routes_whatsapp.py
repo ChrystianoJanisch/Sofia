@@ -2581,3 +2581,72 @@ def inbox_pausar_ia(lead_id: str, db: Session = Depends(get_db)):
     db.commit()
     status = "pausada" if lead.ia_pausada else "ativada"
     return {"mensagem": f"IA {status} para {lead.name or lead.phone}", "ia_pausada": lead.ia_pausada}
+
+
+# ── TEMPLATES (Meta Cloud API) ───────────────────────────────────────────────
+
+import time as _time
+_templates_cache = {"data": None, "ts": 0}
+_TEMPLATES_TTL = 300  # 5 min
+
+
+@router.get("/templates")
+def listar_templates():
+    """Lista templates aprovados da WABA. Cache de 5 min."""
+    import re
+    import requests
+
+    now = _time.time()
+    if _templates_cache["data"] and (now - _templates_cache["ts"]) < _TEMPLATES_TTL:
+        return _templates_cache["data"]
+
+    waba_id = os.getenv("WA_WABA_ID", "")
+    token = os.getenv("WA_ACCESS_TOKEN", "")
+    if not waba_id or not token:
+        return {"erro": "WA_WABA_ID ou WA_ACCESS_TOKEN não configurado"}
+
+    url = f"https://graph.facebook.com/v20.0/{waba_id}/message_templates"
+    params = {
+        "fields": "name,status,language,components",
+        "status": "APPROVED",
+        "limit": 100,
+    }
+    headers = {"Authorization": f"Bearer {token}"}
+
+    try:
+        res = requests.get(url, params=params, headers=headers, timeout=15)
+        if res.status_code != 200:
+            return {"erro": f"Meta API erro {res.status_code}: {res.text}"}
+        data = res.json().get("data", [])
+    except Exception as e:
+        return {"erro": f"Falha ao chamar Meta: {e}"}
+
+    # Filtro por phone_number_id — só retorna templates do número deste projeto
+    # (na Meta, templates são por WABA, mas a WABA é a mesma para os 2 projetos;
+    # diferenciamos por prefixo de nome, se configurado via env)
+    tpl_prefix = os.getenv("WA_TPL_PREFIX", "")
+
+    parsed = []
+    for tpl in data:
+        nome = tpl.get("name", "")
+        if tpl_prefix and not nome.startswith(tpl_prefix):
+            continue
+        components = tpl.get("components", [])
+        body_text = ""
+        for c in components:
+            if c.get("type") == "BODY":
+                body_text = c.get("text", "")
+                break
+        variables = [{"index": int(m.group(1))} for m in re.finditer(r"\{\{(\d+)\}\}", body_text)]
+        variables.sort(key=lambda v: v["index"])
+        parsed.append({
+            "name": nome,
+            "language": tpl.get("language", "pt_BR"),
+            "status": tpl.get("status", ""),
+            "body_text": body_text,
+            "variables": variables,
+        })
+
+    _templates_cache["data"] = parsed
+    _templates_cache["ts"] = now
+    return parsed

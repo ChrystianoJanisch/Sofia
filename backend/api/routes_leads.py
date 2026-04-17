@@ -351,3 +351,181 @@ async def _executar_broadcast(telefones: list, url_imagem: str, caption: str):
         total = _broadcast_estado["enviados"]
         erros = _broadcast_estado["erros"]
         print(f"✅ Broadcast finalizado: {total} enviados, {erros} erros")
+
+
+# ── 1ª MENSAGEM WHATSAPP (Template em massa pros leads NOVO) ─────────────────
+
+_first_msg_estado = {
+    "ativo": False,
+    "total": 0,
+    "enviados": 0,
+    "erros": 0,
+    "status": "parado",
+    "template": "",
+}
+
+
+class FirstMessagePayload(BaseModel):
+    template_name: str
+    language_code: Optional[str] = "pt_BR"
+    variable_mapping: dict = {}  # { "1": "name" | "company" | "custom:Texto" }
+    lead_ids: Optional[list] = None  # Se vazio, envia pra todos NOVO
+    delay_segundos: Optional[int] = 3
+
+
+@router.post("/first-message")
+async def first_message(
+    dados: FirstMessagePayload,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    if _first_msg_estado["ativo"]:
+        return {"erro": "Já existe um envio em lote rodando!"}
+
+    if not dados.template_name:
+        return {"erro": "template_name é obrigatório"}
+
+    # Busca leads elegíveis
+    if dados.lead_ids:
+        leads = db.query(Lead).filter(
+            Lead.id.in_(dados.lead_ids),
+            Lead.phone != None, Lead.phone != "",
+        ).all()
+    else:
+        leads = db.query(Lead).filter(
+            Lead.stage == "novo",
+            Lead.phone != None, Lead.phone != "",
+        ).all()
+
+    # Filtra leads com telefone válido
+    leads_validos = [l for l in leads if l.phone and len(l.phone) >= 8]
+
+    if not leads_validos:
+        return {"erro": "Nenhum lead elegível encontrado"}
+
+    _first_msg_estado.update({
+        "ativo": True,
+        "total": len(leads_validos),
+        "enviados": 0,
+        "erros": 0,
+        "status": "rodando",
+        "template": dados.template_name,
+    })
+
+    lead_ids = [l.id for l in leads_validos]
+    background_tasks.add_task(
+        _executar_first_message,
+        lead_ids,
+        dados.template_name,
+        dados.language_code or "pt_BR",
+        dados.variable_mapping or {},
+        dados.delay_segundos or 3,
+    )
+
+    return {
+        "mensagem": f"Envio iniciado para {len(leads_validos)} leads!",
+        "total": len(leads_validos),
+        "template": dados.template_name,
+    }
+
+
+@router.get("/first-message/status")
+async def first_message_status():
+    return {
+        "ativo": _first_msg_estado["ativo"],
+        "status": _first_msg_estado["status"],
+        "total": _first_msg_estado["total"],
+        "enviados": _first_msg_estado["enviados"],
+        "erros": _first_msg_estado["erros"],
+        "template": _first_msg_estado["template"],
+        "restantes": _first_msg_estado["total"] - _first_msg_estado["enviados"] - _first_msg_estado["erros"],
+    }
+
+
+@router.post("/first-message/cancelar")
+async def first_message_cancelar():
+    if not _first_msg_estado["ativo"]:
+        return {"mensagem": "Nenhum envio ativo"}
+    _first_msg_estado["status"] = "cancelado"
+    return {"mensagem": "Envio cancelado!"}
+
+
+def _resolver_variavel(lead, source: str) -> str:
+    """Resolve o valor de uma variável a partir do mapeamento."""
+    if source.startswith("custom:"):
+        return source[7:]
+    # Campos diretos do lead
+    mapa = {
+        "name": lead.name or "",
+        "company": lead.company or "",
+        "phone": lead.phone or "",
+        "cnpj": lead.cnpj or "",
+        "email": lead.email or "",
+        "product": lead.product or "",
+    }
+    return mapa.get(source, "") or " "
+
+
+async def _executar_first_message(
+    lead_ids: list,
+    template_name: str,
+    language_code: str,
+    variable_mapping: dict,
+    delay_segundos: int,
+):
+    from db.database import SessionLocal
+    from integrations.whatsapp import _enviar_template, _formatar_numero
+    db = SessionLocal()
+    try:
+        for i, lead_id in enumerate(lead_ids):
+            if _first_msg_estado["status"] == "cancelado":
+                print(f"🛑 First-message cancelado. {i}/{len(lead_ids)}")
+                break
+
+            lead = db.get(Lead, lead_id)
+            if not lead or not lead.phone:
+                _first_msg_estado["erros"] += 1
+                continue
+
+            # Monta parâmetros na ordem das variáveis
+            keys_ordenadas = sorted(variable_mapping.keys(), key=lambda k: int(k))
+            params = [_resolver_variavel(lead, variable_mapping[k]) for k in keys_ordenadas]
+
+            numero = _formatar_numero(lead.phone)
+            try:
+                wamid = _enviar_template(numero, template_name, params, lang=language_code)
+                if wamid:
+                    # Sucesso: muda stage e salva msg no inbox
+                    lead.stage = "mensagem_enviada"
+                    lead.updated_at = datetime.utcnow()
+
+                    # Substitui {{N}} no body_text pro inbox (se tivermos)
+                    # Simples: só salva indicador que template foi enviado
+                    inbox_msg = f"[Template enviado: {template_name}] " + " | ".join(params)
+                    wpp_msg = WppMensagem(
+                        lead_id=lead.id,
+                        role="assistant",
+                        content=inbox_msg,
+                        wamid=wamid,
+                        status="sent",
+                    )
+                    db.add(wpp_msg)
+                    db.commit()
+                    _first_msg_estado["enviados"] += 1
+                    print(f"📤 First-msg [{i+1}/{len(lead_ids)}] — {lead.name or numero}")
+                else:
+                    _first_msg_estado["erros"] += 1
+                    print(f"❌ First-msg falhou {numero}")
+            except Exception as e:
+                _first_msg_estado["erros"] += 1
+                print(f"❌ First-msg erro {numero}: {e}")
+
+            if i < len(lead_ids) - 1:
+                await asyncio.sleep(max(delay_segundos, 2))
+    finally:
+        _first_msg_estado["ativo"] = False
+        _first_msg_estado["status"] = "parado"
+        total = _first_msg_estado["enviados"]
+        erros = _first_msg_estado["erros"]
+        print(f"✅ First-message finalizado: {total} enviados, {erros} erros")
+        db.close()
