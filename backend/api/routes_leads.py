@@ -429,6 +429,40 @@ async def first_message(
     }
 
 
+@router.post("/first-message/teste")
+def first_message_teste(
+    template_name: str = Form(...),
+    language_code: str = Form("pt_BR"),
+    variable_mapping: str = Form("{}"),
+    numero_teste: str = Form(...),
+):
+    """Envia o template para UM número (pra testar antes do envio em massa)."""
+    import json as _json
+    from integrations.whatsapp import _enviar_template, _formatar_numero
+
+    try:
+        mapping = _json.loads(variable_mapping) if variable_mapping else {}
+    except Exception:
+        return {"erro": "variable_mapping inválido"}
+
+    # Monta parâmetros — aceita valores literais (custom:) ou resolve vazio
+    keys = sorted(mapping.keys(), key=lambda k: int(k))
+    params = []
+    for k in keys:
+        v = mapping[k]
+        if v.startswith("custom:"):
+            params.append(v[7:])
+        else:
+            # Se mapeou para campo do lead (name, etc), sem lead real usa placeholder
+            params.append(f"[{v}]")
+
+    numero = _formatar_numero(numero_teste)
+    wamid = _enviar_template(numero, template_name, params, lang=language_code)
+    if not wamid:
+        return {"erro": "Falha ao enviar — confira os logs"}
+    return {"mensagem": f"Teste enviado para {numero}", "wamid": wamid}
+
+
 @router.get("/first-message/status")
 async def first_message_status():
     return {

@@ -1075,9 +1075,18 @@
 
       <div id="fm-status" style="display:none;font-size:12px;color:#a78bfa;margin-bottom:12px"></div>
 
-      <div style="display:flex;gap:10px;justify-content:flex-end">
+      <div class="field" style="border-top:1px solid var(--gold-border);padding-top:12px">
+        <label style="color:#a78bfa">🧪 Enviar teste antes</label>
+        <div style="display:flex;gap:6px">
+          <input id="fm-teste-tel" placeholder="Ex: 5551999998888" style="flex:1;background:var(--black-1);color:#fff;border:1px solid var(--gold-border);border-radius:6px;padding:8px;font-size:13px">
+          <button class="btn btn-outline" onclick="enviarTesteFirstMessage()" id="fm-btn-teste" style="border-color:#a78bfa;color:#a78bfa">ENVIAR TESTE</button>
+        </div>
+        <div id="fm-teste-status" style="font-size:11px;color:var(--gray);margin-top:4px"></div>
+      </div>
+
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px">
         <button class="btn btn-outline" onclick="fecharFirstMessage()">CANCELAR</button>
-        <button class="btn btn-gold" id="fm-enviar" onclick="enviarFirstMessage()" disabled style="background:#a78bfa;border-color:#a78bfa;color:#000">ENVIAR</button>
+        <button class="btn btn-gold" id="fm-enviar" onclick="enviarFirstMessage()" disabled style="background:#a78bfa;border-color:#a78bfa;color:#000">ENVIAR PARA TODOS</button>
       </div>
     </div>
   </div>
@@ -1479,10 +1488,31 @@
             if (!d.ativo) {
                 clearInterval(_fmInterval); _fmInterval = null;
                 document.getElementById('fm-enviar').disabled = false;
-                document.getElementById('fm-enviar').textContent = 'ENVIAR';
+                document.getElementById('fm-enviar').textContent = 'ENVIAR PARA TODOS';
                 loadLeads();
             }
         }).catch(function(){})
+    }
+    function enviarTesteFirstMessage() {
+        if (!fmSelected) { toast('Selecione um template', 'error'); return }
+        var tel = document.getElementById('fm-teste-tel').value.trim().replace(/\D/g, '');
+        if (!tel || tel.length < 10) { toast('Digite um número válido (com DDI 55)', 'error'); return }
+        if (!tel.startsWith('55')) tel = '55' + tel;
+        var mapping = fmGetMapping();
+        var btn = document.getElementById('fm-btn-teste');
+        btn.disabled = true; btn.textContent = 'ENVIANDO...';
+        var fd = new FormData();
+        fd.append('template_name', fmSelected.name);
+        fd.append('language_code', fmSelected.language || 'pt_BR');
+        fd.append('variable_mapping', JSON.stringify(mapping));
+        fd.append('numero_teste', tel);
+        authFetch(API() + '/api/leads/first-message/teste', { method: 'POST', body: fd })
+            .then(function(r){return r.json()}).then(function(d){
+                var st = document.getElementById('fm-teste-status');
+                if (d.erro) { st.style.color = 'var(--red)'; st.textContent = '❌ ' + d.erro; toast(d.erro, 'error') }
+                else { st.style.color = 'var(--green)'; st.textContent = '✅ ' + d.mensagem; toast('Teste enviado — verifica o WhatsApp!', 'success') }
+            }).catch(function(e){ toast('Erro: ' + e.message, 'error') })
+            .finally(function(){ btn.disabled = false; btn.textContent = 'ENVIAR TESTE' });
     }
         function importarCSV(ev) { var f = ev.target.files[0]; if (!f) return; var fd = new FormData(); fd.append('file', f); authFetch(API() + '/api/leads/importar-csv', { method: 'POST', body: fd }).then(function (r) { return r.json() }).then(function (d) { toast((d.importados || 0) + ' importados', 'success'); loadLeads() }).catch(function (e) { toast('Erro: ' + e.message, 'error') }); ev.target.value = '' }
         function deletarLead(id, nm) { if (!confirm('Remover ' + nm + '?')) return; authFetch(API() + '/api/leads/' + id, { method: 'DELETE' }).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json() }).then(function () { toast(nm + ' removido', 'success'); loadLeads() }).catch(function (e) { toast('Erro: ' + e.message, 'error') }) }
