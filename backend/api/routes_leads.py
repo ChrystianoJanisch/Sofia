@@ -446,21 +446,24 @@ def first_message_teste(
         return {"erro": "variable_mapping inválido"}
 
     # Monta parâmetros — aceita valores literais (custom:) ou resolve vazio
+    # Lead fake com valores amigáveis pra teste
+    class _FakeLead:
+        name = "Gabriel (Teste)"
+        company = "Empresa Teste"
+        phone = numero_teste
+        cnpj = "00.000.000/0000-00"
+        email = "teste@teste.com"
+        product = "Crédito"
+    fake_lead = _FakeLead()
+
     keys = sorted(mapping.keys(), key=lambda k: int(k))
-    params = []
-    for k in keys:
-        v = mapping[k]
-        if v.startswith("custom:"):
-            params.append(v[7:])
-        else:
-            # Se mapeou para campo do lead (name, etc), sem lead real usa placeholder
-            params.append(f"[{v}]")
+    params = [_resolver_variavel(fake_lead, mapping[k]) for k in keys]
 
     numero = _formatar_numero(numero_teste)
     wamid = _enviar_template(numero, template_name, params, lang=language_code)
     if not wamid:
         return {"erro": "Falha ao enviar — confira os logs"}
-    return {"mensagem": f"Teste enviado para {numero}", "wamid": wamid}
+    return {"mensagem": f"Teste enviado para {numero}", "wamid": wamid, "params": params}
 
 
 @router.get("/first-message/status")
@@ -488,14 +491,16 @@ def _resolver_variavel(lead, source: str) -> str:
     """Resolve o valor de uma variável a partir do mapeamento."""
     if source.startswith("custom:"):
         return source[7:]
-    # Campos diretos do lead
+    # Campos diretos do lead + env vars
     mapa = {
-        "name": lead.name or "",
-        "company": lead.company or "",
-        "phone": lead.phone or "",
-        "cnpj": lead.cnpj or "",
-        "email": lead.email or "",
-        "product": lead.product or "",
+        "name": (lead.name if lead else "") or "",
+        "company": (lead.company if lead else "") or "",
+        "phone": (lead.phone if lead else "") or "",
+        "cnpj": (lead.cnpj if lead else "") or "",
+        "email": (lead.email if lead else "") or "",
+        "product": (lead.product if lead else "") or "",
+        "ia_name": os.getenv("IA_NAME", "Julia"),
+        "empresa": os.getenv("EMPRESA_NOME", "FLC Bank"),
     }
     return mapa.get(source, "") or " "
 

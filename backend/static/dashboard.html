@@ -1363,10 +1363,12 @@
     var fmTemplates = [], fmSelected = null, _fmInterval = null;
     var FM_FIELD_OPTIONS = [
         { v: 'name', l: 'Nome do lead' },
-        { v: 'company', l: 'Empresa' },
-        { v: 'phone', l: 'Telefone' },
-        { v: 'cnpj', l: 'CNPJ' },
-        { v: 'email', l: 'E-mail' },
+        { v: 'ia_name', l: 'Nome da IA (Julia)' },
+        { v: 'empresa', l: 'Nome da Empresa (FLC Bank)' },
+        { v: 'company', l: 'Empresa do lead' },
+        { v: 'phone', l: 'Telefone do lead' },
+        { v: 'cnpj', l: 'CNPJ do lead' },
+        { v: 'email', l: 'E-mail do lead' },
         { v: 'product', l: 'Produto' },
         { v: 'custom', l: 'Texto fixo...' }
     ];
@@ -1452,8 +1454,10 @@
         text = text.replace(/\{\{(\d+)\}\}/g, function(_, idx){
             var src = mapping[idx] || '';
             if (src.indexOf('custom:') === 0) return src.substring(7) || ('{{' + idx + '}}');
-            if (src === 'name') return sampleLead.name || '[nome]';
-            if (src === 'company') return sampleLead.company || '[empresa]';
+            if (src === 'name') return sampleLead.name || '[nome do lead]';
+            if (src === 'ia_name') return 'Julia';
+            if (src === 'empresa') return 'FLC Bank';
+            if (src === 'company') return sampleLead.company || '[empresa do lead]';
             if (src === 'phone') return sampleLead.phone || '[telefone]';
             if (src === 'cnpj') return sampleLead.cnpj || '[cnpj]';
             if (src === 'email') return sampleLead.email || '[email]';
