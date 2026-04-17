@@ -68,6 +68,12 @@ def fazer_ligacao(phone: str, nome: str = "", empresa: str = "", cnpj: str = "")
         raise Exception(f"Erro ElevenLabs outbound: {response.status_code} — {response.text}")
 
     data = response.json()
+
+    # ✅ ElevenLabs pode retornar 200 mas com success: false (canceled, busy, failed etc)
+    if data.get("success") is False:
+        reason = data.get("message", "falha desconhecida")
+        raise Exception(f"ElevenLabs cancelou: {reason}")
+
     conversation_id = data.get("conversation_id") or data.get("sip_call_id") or data.get("call_id") or data.get("id") or ""
 
     if not conversation_id:

@@ -316,27 +316,26 @@ def _limpar_leads_ligando():
             lead.stage = "nao_atendeu"
             lead.wpp_etapa = "pos_ligacao"
 
-            # Envia WhatsApp na primeira tentativa (via template)
-            if lead.call_attempts <= 1:
-                from integrations.whatsapp import IA_NAME, EMPRESA_NOME
-                nome = lead.name or "tudo bem"
-                numero = lead.wpp_phone or lead.phone or ""
-                try:
-                    wamid = enviar_whatsapp(numero, lead.name)
-                    # Salva no inbox (texto legível)
-                    msg = (
-                        f"Olá {nome}! Aqui é a {IA_NAME} da {EMPRESA_NOME}. "
-                        f"Tentei te ligar agora mas não consegui falar com você.\n\n"
-                        f"Liguei porque a gente é especializada em crédito para negativados "
-                        f"e reestruturação financeira de empresas — trabalhamos com mais de 60 "
-                        f"instituições e conseguimos opções que banco tradicional não oferece.\n\n"
-                        f"Posso te explicar melhor como funciona?"
-                    )
-                    wpp_msg = WppMensagem(lead_id=lead.id, role="assistant", content=msg, wamid=wamid or "", status="sent")
-                    db.add(wpp_msg)
-                    print(f"📱 WhatsApp follow-up enviado para {lead.name}")
-                except Exception as e:
-                    print(f"⚠️ Erro ao enviar WhatsApp follow-up: {e}")
+            # Envia WhatsApp em toda tentativa sem resposta (via template)
+            from integrations.whatsapp import IA_NAME, EMPRESA_NOME
+            nome = lead.name or "tudo bem"
+            numero = lead.wpp_phone or lead.phone or ""
+            try:
+                wamid = enviar_whatsapp(numero, lead.name)
+                # Salva no inbox (texto legível)
+                msg = (
+                    f"Olá {nome}! Aqui é a {IA_NAME} da {EMPRESA_NOME}. "
+                    f"Tentei te ligar agora mas não consegui falar com você.\n\n"
+                    f"Liguei porque a gente é especializada em crédito para negativados "
+                    f"e reestruturação financeira de empresas — trabalhamos com mais de 60 "
+                    f"instituições e conseguimos opções que banco tradicional não oferece.\n\n"
+                    f"Posso te explicar melhor como funciona?"
+                )
+                wpp_msg = WppMensagem(lead_id=lead.id, role="assistant", content=msg, wamid=wamid or "", status="sent")
+                db.add(wpp_msg)
+                print(f"📱 WhatsApp follow-up enviado para {lead.name}")
+            except Exception as e:
+                print(f"⚠️ Erro ao enviar WhatsApp follow-up: {e}")
 
         if presos:
             db.commit()

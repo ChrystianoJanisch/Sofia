@@ -243,7 +243,7 @@ def _montar_msg_nao_atendeu(nome: str) -> str:
 def _tratar_nao_atendeu(lead, db: Session):
     """
     Centraliza a lógica de 'não atendeu'.
-    - Só envia WhatsApp na PRIMEIRA vez que não atende
+    - Envia WhatsApp sempre que a ligação falhar (1ª, 2ª e 3ª tentativa)
     - Máximo 3 tentativas de ligação, depois marca como sem_interesse
     """
     # Se já tentou 3 vezes, desiste
@@ -257,24 +257,20 @@ def _tratar_nao_atendeu(lead, db: Session):
     lead.stage     = "nao_atendeu"
     lead.wpp_etapa = "pos_ligacao"
 
-    # Só envia WhatsApp na PRIMEIRA vez
-    if lead.call_attempts <= 1:
-        # Envia via template (cold outreach)
-        numero_wpp = _get_wpp_phone(lead)
-        wamid = enviar_whatsapp(numero_wpp, lead.name) or ""
+    # Envia WhatsApp em toda tentativa sem resposta (via template)
+    numero_wpp = _get_wpp_phone(lead)
+    wamid = enviar_whatsapp(numero_wpp, lead.name) or ""
 
-        # Texto exibido no inbox (representa o template renderizado)
-        msg_inicial = _montar_msg_nao_atendeu(lead.name)
-        _salvar_msg_wpp(lead.id, "assistant", msg_inicial, db, wamid=wamid)
+    # Texto exibido no inbox (representa o template renderizado)
+    msg_inicial = _montar_msg_nao_atendeu(lead.name)
+    _salvar_msg_wpp(lead.id, "assistant", msg_inicial, db, wamid=wamid)
 
-        # Backup em conversa_estado
-        lead.conversa_estado = json.dumps(
-            [{"role": "assistant", "content": msg_inicial}],
-            ensure_ascii=False
-        )
-        db.commit()
-    else:
-        db.commit()
+    # Backup em conversa_estado
+    lead.conversa_estado = json.dumps(
+        [{"role": "assistant", "content": msg_inicial}],
+        ensure_ascii=False
+    )
+    db.commit()
 
 
 class LigarPayload(BaseModel):
