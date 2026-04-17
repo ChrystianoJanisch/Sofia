@@ -1063,6 +1063,11 @@
         </select>
       </div>
 
+      <div id="fm-body-wrap" class="field" style="display:none">
+        <label>Texto do template</label>
+        <div id="fm-body" style="background:#1a1a1a;padding:10px;border-radius:6px;border:1px dashed var(--gold-border);font-size:12px;color:#ccc;white-space:pre-wrap;line-height:1.5"></div>
+      </div>
+
       <div id="fm-vars-wrap" class="field" style="display:none">
         <label>Mapeamento de variáveis</label>
         <div id="fm-vars" style="display:flex;flex-direction:column;gap:8px"></div>
@@ -1396,28 +1401,57 @@
             }).join('');
         }).catch(function(e){ sel.innerHTML = '<option value="">Erro ao carregar</option>' });
     }
+    function fmGuessMapping(bodyText, varIndex) {
+        // Tenta adivinhar o campo baseado no contexto ao redor da variável
+        var re = new RegExp('([\\wÀ-ú\\s,!?.]{0,40})\\{\\{' + varIndex + '\\}\\}', 'i');
+        var m = bodyText.match(re);
+        if (!m) return 'name';
+        var ctx = m[1].toLowerCase();
+        // Saudações comuns → nome do lead
+        if (/(olá|ola|oi|bom dia|boa tarde|boa noite|prezado|sr|sra)\s*[,!]?\s*$/.test(ctx)) return 'name';
+        // "é o/a X" ou "aqui é X" → nome da IA
+        if (/(aqui\s+é|aqui\s+e|é\s+o|é\s+a|sou\s+o|sou\s+a)\s*$/.test(ctx)) return 'ia_name';
+        // "da X" ou "do X" → empresa
+        if (/\s+(da|do|de)\s*$/.test(ctx)) return 'empresa';
+        // Default: baseado na posição (1=nome, 2=ia, 3=empresa)
+        if (varIndex === 1) return 'name';
+        if (varIndex === 2) return 'ia_name';
+        if (varIndex === 3) return 'empresa';
+        return 'name';
+    }
+    function fmRenderBody(bodyText) {
+        // Destaca {{N}} em cor diferente
+        return bodyText.replace(/\{\{(\d+)\}\}/g, '<span style="color:#a78bfa;font-weight:bold;background:rgba(167,139,250,0.15);padding:1px 4px;border-radius:3px">{{$1}}</span>');
+    }
     function fmOnTemplateChange() {
         var name = document.getElementById('fm-template').value;
         fmSelected = fmTemplates.find(function(t){ return t.name === name }) || null;
         var wrap = document.getElementById('fm-vars-wrap');
+        var bodyWrap = document.getElementById('fm-body-wrap');
+        var bodyEl = document.getElementById('fm-body');
         var varsEl = document.getElementById('fm-vars');
         if (!fmSelected) {
             wrap.style.display = 'none';
+            bodyWrap.style.display = 'none';
             document.getElementById('fm-preview').textContent = 'Selecione um template';
             document.getElementById('fm-enviar').disabled = true;
             return;
         }
+        // Mostra o body text do template com variáveis destacadas
+        bodyWrap.style.display = '';
+        bodyEl.innerHTML = fmRenderBody(fmSelected.body_text || '');
         var vars = fmSelected.variables || [];
         if (vars.length === 0) {
             wrap.style.display = 'none';
         } else {
             wrap.style.display = '';
             varsEl.innerHTML = vars.map(function(v){
+                var guess = fmGuessMapping(fmSelected.body_text || '', v.index);
                 var sel = '<select class="fm-var-sel" data-idx="' + v.index + '" onchange="fmUpdatePreview()" style="background:var(--black-1);color:#fff;border:1px solid var(--gold-border);border-radius:6px;padding:6px;font-size:12px;flex:1">' +
-                    FM_FIELD_OPTIONS.map(function(o){ return '<option value="' + o.v + '">' + o.l + '</option>' }).join('') +
+                    FM_FIELD_OPTIONS.map(function(o){ return '<option value="' + o.v + '"' + (o.v === guess ? ' selected' : '') + '>' + o.l + '</option>' }).join('') +
                 '</select>';
                 var custom = '<input class="fm-var-custom" data-idx="' + v.index + '" placeholder="Texto fixo" style="display:none;flex:1;background:var(--black-1);color:#fff;border:1px solid var(--gold-border);border-radius:6px;padding:6px;font-size:12px" oninput="fmUpdatePreview()">';
-                return '<div style="display:flex;gap:6px;align-items:center"><span style="font-family:monospace;color:var(--gold);min-width:30px">{{' + v.index + '}}</span>' + sel + custom + '</div>';
+                return '<div style="display:flex;gap:6px;align-items:center"><span style="font-family:monospace;color:#a78bfa;min-width:35px;font-weight:bold">{{' + v.index + '}}</span>' + sel + custom + '</div>';
             }).join('');
             // Listener pra trocar entre select de campo e input de custom
             varsEl.querySelectorAll('.fm-var-sel').forEach(function(s){
