@@ -291,26 +291,28 @@ async def executar_followups():
                 if ultima_msg:
                     continue  # Já mandou msg nos últimos 7 dias, pula
 
-                # Gera mensagem personalizada
-                msg = _gerar_msg_followup(
-                    lead.name or "",
-                    resumo=lead.resumo or "",
-                    produto=lead.product or ""
-                )
-
-                # Envia
+                # Envia via template (fora da janela de 24h)
                 numero = lead.wpp_phone or lead.phone or ""
                 if not numero:
                     continue
 
                 numero_fmt = _formatar_numero(numero)
-                _enviar(numero_fmt, msg)
+                from integrations.whatsapp import enviar_followup_semanal, IA_NAME, EMPRESA_NOME
+                wamid = enviar_followup_semanal(numero_fmt, lead.name or "")
 
-                # Salva no banco
+                # Salva no inbox (texto legível)
+                nome = lead.name or ""
+                msg = (
+                    f"Oi{' ' + nome if nome else ''}! Aqui é a {IA_NAME} da {EMPRESA_NOME}.\n\n"
+                    f"Estou passando pra saber se você ainda tem interesse em conversar "
+                    f"sobre as soluções de crédito que comentamos. Posso te ajudar em algo?"
+                )
                 wpp_msg = WppMensagem(
                     lead_id=lead.id,
                     role="assistant",
-                    content=msg
+                    content=msg,
+                    wamid=wamid,
+                    status="sent",
                 )
                 db.add(wpp_msg)
                 db.commit()

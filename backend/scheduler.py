@@ -20,8 +20,8 @@ def _get_wpp_phone(lead) -> str:
 
 
 def _enviar_lembrete(lead, meeting, db):
-    """Envia lembrete de reunião via WhatsApp e salva no inbox."""
-    from integrations.whatsapp import enviar_whatsapp
+    """Envia lembrete de reunião via template e salva no inbox."""
+    from integrations.whatsapp import enviar_lembrete_reuniao
     from db.database import WppMensagem
 
     nome = lead.name or "Cliente"
@@ -34,25 +34,20 @@ def _enviar_lembrete(lead, meeting, db):
     except:
         hora = meeting.scheduled_at
 
-    tipo_texto = "vídeo chamada 🎥" if meeting.tipo in ("meet", "video_chamada", "video") else "ligação telefônica 📞"
-
-    msg = (
-        f"Olá {nome}! 😊 Aqui é a {IA_NAME} da {EMPRESA_NOME}.\n\n"
-        f"Só passando pra lembrar que sua reunião com nosso especialista "
-        f"está marcada pra hoje às {hora}.\n\n"
-        f"Tipo: {tipo_texto}\n"
-    )
-
-    if meeting.link_cliente and meeting.tipo in ("meet", "video_chamada", "video"):
-        msg += f"\nAcesse por aqui: {meeting.link_cliente}\n"
-
-    msg += "\nTe esperamos! Qualquer dúvida, é só me chamar aqui. 😊"
+    tipo_texto = "vídeo chamada" if meeting.tipo in ("meet", "video_chamada", "video") else "ligação telefônica"
 
     numero = _get_wpp_phone(lead)
     try:
-        enviar_whatsapp(numero, nome, mensagem=msg)
-        # Salva no inbox
-        wpp_msg = WppMensagem(lead_id=lead.id, role="assistant", content=msg)
+        wamid = enviar_lembrete_reuniao(numero, nome, hora, tipo_texto)
+        # Salva no inbox (texto que será exibido no dashboard)
+        msg = (
+            f"Olá {nome}! Aqui é a {IA_NAME} da {EMPRESA_NOME}.\n\n"
+            f"Só passando pra lembrar que sua reunião com nosso especialista "
+            f"está marcada pra hoje às {hora}.\n\n"
+            f"Tipo: {tipo_texto}\n\n"
+            f"Te esperamos! Qualquer dúvida, é só me chamar aqui."
+        )
+        wpp_msg = WppMensagem(lead_id=lead.id, role="assistant", content=msg, wamid=wamid, status="sent")
         db.add(wpp_msg)
         db.commit()
         print(f"🔔 Lembrete enviado para {nome} ({numero}) — reunião às {hora}")

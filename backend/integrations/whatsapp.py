@@ -23,7 +23,9 @@ def _formatar_numero(phone: str) -> str:
 
 
 def _enviar(numero: str, mensagem: str) -> str:
-    """Envia mensagem de texto simples via Meta Cloud API. Retorna wamid."""
+    """Envia mensagem de texto simples via Meta Cloud API. Retorna wamid.
+    Só funciona dentro da janela de 24h (cliente mandou mensagem recentemente).
+    Para cold outreach use _enviar_template()."""
     if not WA_PHONE_NUMBER_ID or not WA_ACCESS_TOKEN:
         print(f"⚠️ WhatsApp não configurado — pulando envio para {numero}")
         return ""
@@ -54,49 +56,120 @@ def _enviar(numero: str, mensagem: str) -> str:
         return ""
 
 
-def enviar_whatsapp(phone: str, nome: str, mensagem: str = None):
+def _enviar_template(numero: str, template_name: str, params: list, lang: str = "pt_BR") -> str:
+    """Envia template aprovado via Meta Cloud API. Retorna wamid.
+    Use para cold outreach (mensagens fora da janela de 24h).
+
+    params: lista de strings na ordem das variáveis {{1}}, {{2}}, etc.
+    """
+    if not WA_PHONE_NUMBER_ID or not WA_ACCESS_TOKEN:
+        print(f"⚠️ WhatsApp não configurado — pulando template {template_name} para {numero}")
+        return ""
+
+    body_params = [{"type": "text", "text": str(p) if p else " "} for p in params]
+    payload = {
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": numero,
+        "type": "template",
+        "template": {
+            "name": template_name,
+            "language": {"code": lang},
+            "components": [{"type": "body", "parameters": body_params}] if params else [],
+        },
+    }
+
+    try:
+        res = requests.post(BASE_URL, json=payload, headers=HEADERS, timeout=10)
+        if res.status_code in (200, 201):
+            data = res.json()
+            wamid = ""
+            messages = data.get("messages", [])
+            if messages:
+                wamid = messages[0].get("id", "")
+            print(f"✅ Template '{template_name}' enviado para {numero} (wamid: {wamid[:20]})")
+            return wamid
+        else:
+            print(f"❌ Erro template '{template_name}' {res.status_code}: {res.text}")
+            return ""
+    except Exception as e:
+        print(f"❌ Erro ao enviar template '{template_name}': {e}")
+        return ""
+
+
+# ── TEMPLATES (configuráveis por env vars) ──────────────────────────────────
+TPL_FOLLOWUP_NAO_ATENDEU = os.getenv("WA_TPL_FOLLOWUP_NAO_ATENDEU", "followup_ligacao_nao_atendido")
+TPL_CALLBACK_CONFIRMADO  = os.getenv("WA_TPL_CALLBACK_CONFIRMADO", "callback_confirmado")
+TPL_LEMBRETE_REUNIAO     = os.getenv("WA_TPL_LEMBRETE_REUNIAO", "lembrete_reuniao")
+TPL_CONFIRMACAO_VIDEO    = os.getenv("WA_TPL_CONFIRMACAO_VIDEO", "confirmacao_reuniao_video")
+TPL_CONFIRMACAO_LIGACAO  = os.getenv("WA_TPL_CONFIRMACAO_LIGACAO", "confirmacao_reuniao_ligacao")
+TPL_CONFIRMACAO_WPP      = os.getenv("WA_TPL_CONFIRMACAO_WPP", "confirmacao_atendimento_wpp")
+TPL_FOLLOWUP_SEMANAL     = os.getenv("WA_TPL_FOLLOWUP_SEMANAL", "followup_semanal")
+TPL_AGENDAMENTO_POS_LIG  = os.getenv("WA_TPL_AGENDAMENTO_POS_LIG", "agendamento_pos_ligacao")
+
+
+def enviar_whatsapp(phone: str, nome: str, mensagem: str = None) -> str:
+    """Envia follow-up pós-ligação via template aprovado. Retorna wamid."""
     numero = _formatar_numero(phone)
-    if mensagem is None:
-        mensagem = (
-            f"Olá {nome or 'tudo bem'}! 👋\n\n"
-            f"Aqui é a {IA_NAME} da {EMPRESA_NOME}. Tentei te ligar agora mas não consegui falar com você.\n\n"
-            f"Temos condições especiais de crédito com acesso a mais de 60 instituições financeiras. "
-            f"Quando tiver um momento, me responda aqui e posso te apresentar as opções! 😊"
-        )
-    _enviar(numero, mensagem)
+    return _enviar_template(
+        numero,
+        TPL_FOLLOWUP_NAO_ATENDEU,
+        [nome or "tudo bem", IA_NAME, EMPRESA_NOME],
+    )
 
 
-def enviar_agendamento_whatsapp(phone: str, nome: str, mensagem: str = None):
+def enviar_agendamento_whatsapp(phone: str, nome: str, mensagem: str = None) -> str:
+    """Envia convite de agendamento pós-ligação via template."""
     numero = _formatar_numero(phone)
-    if mensagem is None:
-        mensagem = (
-            f"Olá {nome or ''}! 😊 Aqui é a {IA_NAME} da {EMPRESA_NOME}.\n\n"
-            f"Foi um prazer falar com você! Para agendarmos sua reunião com um especialista, "
-            f"qual dia e horário fica melhor para você?\n\n"
-            f"Pode me dizer o dia e a hora que prefere! 📅"
-        )
-    _enviar(numero, mensagem)
+    return _enviar_template(
+        numero,
+        TPL_AGENDAMENTO_POS_LIG,
+        [nome or "tudo bem", IA_NAME, EMPRESA_NOME],
+    )
 
 
-def enviar_confirmacao_agendamento(phone: str, nome: str, horario: str, link_meet: str = None):
+def enviar_confirmacao_agendamento(phone: str, nome: str, horario: str, link_meet: str = None) -> str:
+    """Envia confirmação de reunião via template (vídeo com link ou ligação)."""
     numero = _formatar_numero(phone)
     if link_meet:
-        mensagem = (
-            f"Olá {nome or ''}! 😊\n\n"
-            f"Sua reunião foi agendada para {horario}.\n\n"
-            f"🎥 Link da reunião:\n{link_meet}\n\n"
-            f"Um especialista da {EMPRESA_NOME} estará te esperando. Qualquer dúvida é só responder aqui!\n\n"
-            f"Até logo! 👋"
-        )
-    else:
-        mensagem = (
-            f"Olá {nome or ''}! 😊\n\n"
-            f"Sua reunião foi agendada para {horario}.\n\n"
-            f"📞 Um especialista da {EMPRESA_NOME} vai te ligar no horário combinado. "
-            f"Qualquer dúvida é só responder aqui!\n\n"
-            f"Até logo! 👋"
-        )
-    _enviar(numero, mensagem)
+        return _enviar_template(numero, TPL_CONFIRMACAO_VIDEO, [horario, link_meet])
+    return _enviar_template(numero, TPL_CONFIRMACAO_LIGACAO, [horario])
+
+
+def enviar_callback_confirmado(phone: str, nome: str, dia: str, hora: str) -> str:
+    """Envia confirmação de callback agendado via template."""
+    numero = _formatar_numero(phone)
+    return _enviar_template(
+        numero,
+        TPL_CALLBACK_CONFIRMADO,
+        [nome or "tudo bem", IA_NAME, EMPRESA_NOME, dia, hora],
+    )
+
+
+def enviar_lembrete_reuniao(phone: str, nome: str, hora: str, tipo: str) -> str:
+    """Envia lembrete de reunião via template."""
+    numero = _formatar_numero(phone)
+    return _enviar_template(
+        numero,
+        TPL_LEMBRETE_REUNIAO,
+        [nome or "Cliente", IA_NAME, EMPRESA_NOME, hora, tipo],
+    )
+
+
+def enviar_confirmacao_wpp(phone: str, horario: str) -> str:
+    """Envia confirmação de atendimento por WhatsApp via template."""
+    numero = _formatar_numero(phone)
+    return _enviar_template(numero, TPL_CONFIRMACAO_WPP, [horario, EMPRESA_NOME])
+
+
+def enviar_followup_semanal(phone: str, nome: str) -> str:
+    """Envia follow-up semanal para lead interessado via template."""
+    numero = _formatar_numero(phone)
+    return _enviar_template(
+        numero,
+        TPL_FOLLOWUP_SEMANAL,
+        [nome or "tudo bem", IA_NAME, EMPRESA_NOME],
+    )
 
 
 # ── ENVIO DE MÍDIA ───────────────────────────────────────────────────────────

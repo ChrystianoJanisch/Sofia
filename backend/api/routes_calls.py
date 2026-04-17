@@ -211,7 +211,7 @@ def _extrair_whatsapp_da_transcricao(transcricao: str, phone_original: str = "")
         print(f"⚠️ Erro ao extrair WhatsApp da transcrição: {e}")
         return None
 
-def _salvar_msg_wpp(lead_id: str, role: str, content: str, db: Session):
+def _salvar_msg_wpp(lead_id: str, role: str, content: str, db: Session, wamid: str = ""):
     """
     Salva a mensagem na tabela wpp_mensagens.
     Não faz commit — quem chama decide quando commitar.
@@ -221,13 +221,15 @@ def _salvar_msg_wpp(lead_id: str, role: str, content: str, db: Session):
         lead_id=lead_id,
         role=role,
         content=content,
+        wamid=wamid,
+        status="sent" if role == "assistant" else "",
     )
     db.add(msg)
 
 
 def _montar_msg_nao_atendeu(nome: str) -> str:
-    """Monta a mensagem exata que será enviada E salva no banco."""
-    saudacao = f"Olá {nome.strip()}! 👋 " if nome and nome.strip() else "Olá! 👋 "
+    """Monta o texto exibido no inbox (o envio real vai via template)."""
+    saudacao = f"Olá {nome.strip()}! " if nome and nome.strip() else "Olá! "
     return (
         saudacao +
         f"Aqui é a {IA_NAME} da {EMPRESA_NOME}. "
@@ -257,22 +259,20 @@ def _tratar_nao_atendeu(lead, db: Session):
 
     # Só envia WhatsApp na PRIMEIRA vez
     if lead.call_attempts <= 1:
+        # Envia via template (cold outreach)
+        numero_wpp = _get_wpp_phone(lead)
+        wamid = enviar_whatsapp(numero_wpp, lead.name) or ""
+
+        # Texto exibido no inbox (representa o template renderizado)
         msg_inicial = _montar_msg_nao_atendeu(lead.name)
+        _salvar_msg_wpp(lead.id, "assistant", msg_inicial, db, wamid=wamid)
 
-        # Salva na tabela wpp_mensagens (fonte da verdade)
-        _salvar_msg_wpp(lead.id, "assistant", msg_inicial, db)
-
-        # Mantém conversa_estado como backup
+        # Backup em conversa_estado
         lead.conversa_estado = json.dumps(
             [{"role": "assistant", "content": msg_inicial}],
             ensure_ascii=False
         )
-
         db.commit()
-
-        # Envia a MESMA mensagem que foi salva no banco
-        numero_wpp = _get_wpp_phone(lead)
-        enviar_whatsapp(numero_wpp, lead.name, mensagem=msg_inicial)
     else:
         db.commit()
 
@@ -639,18 +639,18 @@ async def pos_chamada(request: Request, db: Session = Depends(get_db)):
             lead.conversa = transcricao_texto
             lead.updated_at = datetime.utcnow()
 
-            # ── Envia WhatsApp avisando sobre o callback ──────────────
-            from integrations.whatsapp import _enviar
+            # ── Envia WhatsApp avisando sobre o callback (via template) ────
+            from integrations.whatsapp import enviar_callback_confirmado
             wpp_num = _get_wpp_phone(lead)
             dia_txt = "hoje" if periodo == "hoje" else "amanhã"
             nome = lead.name or ""
+            enviar_callback_confirmado(wpp_num, nome, dia_txt, horario)
             msg_callback = (
-                f"Oi{' ' + nome if nome else ''}! 😊 Aqui é a {IA_NAME} da {EMPRESA_NOME}.\n\n"
+                f"Oi{' ' + nome if nome else ''}! Aqui é a {IA_NAME} da {EMPRESA_NOME}.\n\n"
                 f"Conforme combinamos, vou te ligar {dia_txt} às {horario}.\n\n"
                 f"Se preferir, podemos conversar por aqui mesmo pelo WhatsApp! "
-                f"É só me responder. 💬"
+                f"É só me responder."
             )
-            _enviar(wpp_num, msg_callback)
             _salvar_msg_wpp(lead.id, "assistant", msg_callback, db)
             lead.wpp_etapa = "conversa"
 
@@ -700,16 +700,17 @@ async def pos_chamada(request: Request, db: Session = Depends(get_db)):
             )
             _salvar_msg_wpp(lead.id, "system", nota_interna, db)
 
-        saudacao = f"Olá {lead.name}! 😊 " if lead.name else "Olá! 😊 "
+        # Envia via template (cold outreach)
+        wamid_ag = enviar_agendamento_whatsapp(numero_wpp, lead.name) or ""
+        saudacao = f"Olá {lead.name}! " if lead.name else "Olá! "
         msg_agendamento = (
             saudacao +
             f"Aqui é a {IA_NAME} da {EMPRESA_NOME}. "
-            "Foi ótimo conversar com você! 😊\n\n"
+            "Foi ótimo conversar com você!\n\n"
             "Vamos prosseguir para o agendamento ou ficou com alguma dúvida sobre o que conversamos? "
             "Pode me perguntar aqui que eu te ajudo!"
         )
-        _salvar_msg_wpp(lead.id, "assistant", msg_agendamento, db)
-        enviar_agendamento_whatsapp(numero_wpp, lead.name, mensagem=msg_agendamento)
+        _salvar_msg_wpp(lead.id, "assistant", msg_agendamento, db, wamid=wamid_ag)
 
     elif temp == "cold":
         lead.stage = "sem_interesse"
