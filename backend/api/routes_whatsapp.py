@@ -1036,15 +1036,20 @@ async def whatsapp_webhook(request: Request, db: Session = Depends(get_db)):
                 for st in value.get("statuses", []):
                     wamid = st.get("id", "")
                     new_status = st.get("status", "")  # sent, delivered, read, failed
-                    print(f"📨 Status webhook: {new_status} para wamid={wamid[:30]}")
-                    if wamid and new_status in ("sent", "delivered", "read"):
+                    err_info = ""
+                    if new_status == "failed":
+                        errors = st.get("errors", [])
+                        if errors:
+                            err_info = f" — {errors[0].get('title', '')} ({errors[0].get('code', '')}): {errors[0].get('message', '')}"
+                    print(f"📨 Status webhook: {new_status}{err_info} para wamid={wamid[:30]}")
+                    if wamid and new_status in ("sent", "delivered", "read", "failed"):
                         msg = db.query(WppMensagem).filter(WppMensagem.wamid == wamid).first()
                         if msg:
                             msg.status = new_status
                             db.commit()
                             print(f"   ✅ Atualizado para {new_status}")
                         else:
-                            print(f"   ⚠️ Mensagem não encontrada no banco")
+                            print(f"   ⚠️ Mensagem não encontrada no banco (wamid: {wamid})")
                 return {"ok": True}
 
             # Extrair mensagem
@@ -2650,3 +2655,88 @@ def listar_templates():
     _templates_cache["data"] = parsed
     _templates_cache["ts"] = now
     return parsed
+
+
+# ── ESTATÍSTICAS DE ENTREGA ──────────────────────────────────────────────────
+
+@router.get("/stats")
+def whatsapp_stats(dias: int = 7, db: Session = Depends(get_db)):
+    """Retorna contagem de mensagens enviadas/entregues/lidas/falhadas nos últimos N dias."""
+    from datetime import timedelta as _td
+    desde = datetime.utcnow() - _td(days=max(1, dias))
+
+    total = db.query(WppMensagem).filter(
+        WppMensagem.role == "assistant",
+        WppMensagem.created_at >= desde,
+    ).count()
+
+    com_wamid = db.query(WppMensagem).filter(
+        WppMensagem.role == "assistant",
+        WppMensagem.created_at >= desde,
+        WppMensagem.wamid != "",
+        WppMensagem.wamid != None,
+    ).count()
+
+    sent = db.query(WppMensagem).filter(
+        WppMensagem.role == "assistant",
+        WppMensagem.created_at >= desde,
+        WppMensagem.status == "sent",
+    ).count()
+
+    delivered = db.query(WppMensagem).filter(
+        WppMensagem.role == "assistant",
+        WppMensagem.created_at >= desde,
+        WppMensagem.status == "delivered",
+    ).count()
+
+    read = db.query(WppMensagem).filter(
+        WppMensagem.role == "assistant",
+        WppMensagem.created_at >= desde,
+        WppMensagem.status == "read",
+    ).count()
+
+    failed = db.query(WppMensagem).filter(
+        WppMensagem.role == "assistant",
+        WppMensagem.created_at >= desde,
+        WppMensagem.status == "failed",
+    ).count()
+
+    sem_status = total - sent - delivered - read - failed
+
+    # Últimas 10 mensagens com falha (pra debug)
+    falhas_recentes = (
+        db.query(WppMensagem)
+        .filter(
+            WppMensagem.role == "assistant",
+            WppMensagem.status == "failed",
+            WppMensagem.created_at >= desde,
+        )
+        .order_by(WppMensagem.created_at.desc())
+        .limit(10)
+        .all()
+    )
+
+    return {
+        "periodo_dias": dias,
+        "total_enviadas_pelo_sistema": total,
+        "com_wamid": com_wamid,  # tiveram resposta da Meta API
+        "sem_wamid": total - com_wamid,  # falharam ANTES de chegar na Meta
+        "status": {
+            "sent": sent,
+            "delivered": delivered,
+            "read": read,
+            "failed": failed,
+            "sem_status": sem_status,
+        },
+        "taxa_entrega_pct": round((delivered + read) / com_wamid * 100, 1) if com_wamid else 0,
+        "taxa_leitura_pct": round(read / com_wamid * 100, 1) if com_wamid else 0,
+        "falhas_recentes": [
+            {
+                "lead_id": f.lead_id,
+                "wamid": f.wamid,
+                "preview": f.content[:80],
+                "created_at": str(f.created_at),
+            }
+            for f in falhas_recentes
+        ],
+    }
