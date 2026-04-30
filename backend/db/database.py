@@ -451,13 +451,16 @@ def _migrar_colunas():
         "CREATE TABLE IF NOT EXISTS ab_tests (id VARCHAR PRIMARY KEY, name VARCHAR NOT NULL, description TEXT DEFAULT '', variant_a_name VARCHAR DEFAULT 'A', variant_a_config TEXT DEFAULT '{}', variant_b_name VARCHAR DEFAULT 'B', variant_b_config TEXT DEFAULT '{}', metric VARCHAR DEFAULT 'conversion_rate', status VARCHAR DEFAULT 'active', total_a INTEGER DEFAULT 0, total_b INTEGER DEFAULT 0, conversions_a INTEGER DEFAULT 0, conversions_b INTEGER DEFAULT 0, winner VARCHAR DEFAULT '', confidence FLOAT DEFAULT 0, created_at TIMESTAMP DEFAULT NOW(), completed_at TIMESTAMP)",
         "CREATE TABLE IF NOT EXISTS ab_results (id VARCHAR PRIMARY KEY, test_id VARCHAR REFERENCES ab_tests(id), lead_id VARCHAR REFERENCES leads(id), call_id VARCHAR REFERENCES call_sessions(id), variant VARCHAR DEFAULT '', outcome VARCHAR DEFAULT '', temperature VARCHAR DEFAULT '', duration_sec INTEGER DEFAULT 0, notes TEXT DEFAULT '', created_at TIMESTAMP DEFAULT NOW())",
     ]
-    with engine.connect() as conn:
-        for sql in migracoes:
-            try:
+    # Cada migração roda em conexão própria — evita InFailedSqlTransaction
+    # em cascata quando uma migração falha (ex: timeout)
+    for sql in migracoes:
+        try:
+            with engine.begin() as conn:
                 conn.execute(text(sql))
-                conn.commit()
-            except Exception as e:
-                print(f"⚠️ Migração ignorada: {e}")
+        except Exception as e:
+            # Compacta mensagem (algumas vêm com SQL completo)
+            msg = str(e).split("\n")[0][:120]
+            print(f"⚠️ Migração ignorada: {msg}")
 
 
 def _normalizar_telefones_existentes():
