@@ -1054,7 +1054,14 @@
       <button class="modal-close" onclick="fecharFirstMessage()">✕</button>
       <h2>1ª Mensagem WhatsApp</h2>
       <p id="fm-count" style="color:#a78bfa;font-size:13px;margin-bottom:8px">Carregando leads elegíveis...</p>
-      <p style="color:var(--gray-dim);font-size:12px;margin-bottom:16px">Envia um template aprovado do Meta para todos os leads com stage <b>Novo</b>.</p>
+
+      <div class="field">
+        <label>Público alvo</label>
+        <select id="fm-target" onchange="fmAtualizarCount()" style="width:100%;background:var(--black-1);color:#fff;border:1px solid var(--gold-border);border-radius:8px;padding:10px;font-size:13px">
+          <option value="novo">Leads novos (stage Novo)</option>
+          <option value="sem_msg">Leads contatados que não receberam WhatsApp ainda</option>
+        </select>
+      </div>
 
       <div class="field">
         <label>Template aprovado</label>
@@ -1380,13 +1387,27 @@
     function abrirFirstMessage() {
         document.getElementById('modal-first-msg').classList.add('open');
         document.getElementById('fm-enviar').disabled = true;
-        document.getElementById('fm-enviar').textContent = 'ENVIAR';
+        document.getElementById('fm-enviar').textContent = 'ENVIAR PARA TODOS';
         document.getElementById('fm-status').style.display = 'none';
-        // Conta leads elegíveis
-        var novos = leads.filter(function(l){ return l.stage === 'novo' && l.phone }).length;
-        document.getElementById('fm-count').innerHTML = '<b>' + novos + '</b> leads com stage "Novo" serão contatados.';
-        // Carrega templates
+        document.getElementById('fm-target').value = 'novo';
+        fmAtualizarCount();
         fmLoadTemplates();
+    }
+    function fmAtualizarCount() {
+        var target = document.getElementById('fm-target').value;
+        var count = 0, label = '';
+        if (target === 'novo') {
+            count = leads.filter(function(l){ return l.stage === 'novo' && l.phone }).length;
+            label = 'leads com stage "Novo"';
+        } else if (target === 'sem_msg') {
+            // Aproximação no front: leads em nao_atendeu/sem_interesse/ligando
+            // (o backend faz a filtragem real verificando wpp_mensagens)
+            count = leads.filter(function(l){
+                return l.phone && ['nao_atendeu', 'sem_interesse', 'ligando'].indexOf(l.stage) >= 0;
+            }).length;
+            label = 'leads contatados (sem WhatsApp ainda — backend confirma)';
+        }
+        document.getElementById('fm-count').innerHTML = '<b>~' + count + '</b> ' + label;
     }
     function fecharFirstMessage() { document.getElementById('modal-first-msg').classList.remove('open') }
     function fmLoadTemplates() {
@@ -1503,21 +1524,21 @@
     function enviarFirstMessage() {
         if (!fmSelected) { toast('Selecione um template', 'error'); return }
         var mapping = fmGetMapping();
-        var novos = leads.filter(function(l){ return l.stage === 'novo' && l.phone }).length;
-        if (novos === 0) { toast('Nenhum lead com stage Novo', 'error'); return }
-        if (!confirm('Enviar template "' + fmSelected.name + '" para ' + novos + ' leads?')) return;
+        var target = document.getElementById('fm-target').value;
+        var label = target === 'sem_msg' ? 'leads contatados sem WhatsApp' : 'leads novos';
+        if (!confirm('Enviar template "' + fmSelected.name + '" para os ' + label + '?')) return;
         var btn = document.getElementById('fm-enviar');
         btn.disabled = true; btn.textContent = 'ENVIANDO...';
         authFetch(API() + '/api/leads/first-message', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ template_name: fmSelected.name, language_code: fmSelected.language || 'pt_BR', variable_mapping: mapping })
+            body: JSON.stringify({ template_name: fmSelected.name, language_code: fmSelected.language || 'pt_BR', variable_mapping: mapping, target: target })
         }).then(function(r){return r.json()}).then(function(d){
-            if (d.erro) { toast(d.erro, 'error'); btn.disabled = false; btn.textContent = 'ENVIAR'; return }
+            if (d.erro) { toast(d.erro, 'error'); btn.disabled = false; btn.textContent = 'ENVIAR PARA TODOS'; return }
             toast(d.mensagem, 'success');
             document.getElementById('fm-status').style.display = '';
             _fmInterval = setInterval(fmAtualizarStatus, 3000);
-        }).catch(function(e){ toast('Erro: ' + e.message, 'error'); btn.disabled = false; btn.textContent = 'ENVIAR' });
+        }).catch(function(e){ toast('Erro: ' + e.message, 'error'); btn.disabled = false; btn.textContent = 'ENVIAR PARA TODOS' });
     }
     function fmAtualizarStatus() {
         authFetch(API() + '/api/leads/first-message/status').then(function(r){return r.json()}).then(function(d){

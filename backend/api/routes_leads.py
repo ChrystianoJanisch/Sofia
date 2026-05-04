@@ -369,7 +369,8 @@ class FirstMessagePayload(BaseModel):
     template_name: str
     language_code: Optional[str] = "pt_BR"
     variable_mapping: dict = {}  # { "1": "name" | "company" | "custom:Texto" }
-    lead_ids: Optional[list] = None  # Se vazio, envia pra todos NOVO
+    lead_ids: Optional[list] = None  # Se vazio, usa target
+    target: Optional[str] = "novo"  # "novo" | "sem_msg" | "todos"
     delay_segundos: Optional[int] = 3
 
 
@@ -391,7 +392,32 @@ async def first_message(
             Lead.id.in_(dados.lead_ids),
             Lead.phone != None, Lead.phone != "",
         ).all()
+    elif dados.target == "sem_msg":
+        # Leads que tentaram ligar mas nunca receberam WhatsApp com sucesso
+        # (sem WppMensagem com wamid preenchido)
+        leads_com_msg_subq = (
+            db.query(WppMensagem.lead_id)
+            .filter(
+                WppMensagem.role == "assistant",
+                WppMensagem.wamid != "",
+                WppMensagem.wamid != None,
+            )
+            .distinct()
+            .subquery()
+        )
+        leads = db.query(Lead).filter(
+            Lead.stage.in_(["nao_atendeu", "sem_interesse", "ligando"]),
+            Lead.phone != None, Lead.phone != "",
+            ~Lead.id.in_(leads_com_msg_subq),
+        ).all()
+    elif dados.target == "todos":
+        # Todos os leads não-novos com telefone (cuidado: muitos)
+        leads = db.query(Lead).filter(
+            Lead.stage != "novo",
+            Lead.phone != None, Lead.phone != "",
+        ).all()
     else:
+        # default: novo
         leads = db.query(Lead).filter(
             Lead.stage == "novo",
             Lead.phone != None, Lead.phone != "",
@@ -534,8 +560,11 @@ async def _executar_first_message(
             try:
                 wamid = _enviar_template(numero, template_name, params, lang=language_code)
                 if wamid:
-                    # Sucesso: muda stage e salva msg no inbox
-                    lead.stage = "mensagem_enviada"
+                    # Sucesso: salva msg no inbox
+                    # Só muda stage pra "mensagem_enviada" se ainda era "novo"
+                    # (pra preservar stages como nao_atendeu, sem_interesse no recovery)
+                    if lead.stage == "novo":
+                        lead.stage = "mensagem_enviada"
                     lead.updated_at = datetime.utcnow()
 
                     # Substitui {{N}} no body_text pro inbox (se tivermos)
