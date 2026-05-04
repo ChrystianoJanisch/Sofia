@@ -14,10 +14,10 @@ engine = create_engine(
     DATABASE_URL,
     connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {},
     pool_pre_ping=True,
-    # ⚠️ Supabase pooler em session mode tem limite de 15 conexões
-    # pool_size + max_overflow não pode passar de 15 — usamos 5+5=10
-    pool_size=5,
-    max_overflow=5,
+    # Compatível com Supabase Transaction Pooler (porta 6543) — aguenta ~200 conn
+    # Se DATABASE_URL apontar pro Session Pooler (porta 5432), reduzir pra 5+5
+    pool_size=10,
+    max_overflow=20,
     pool_recycle=1800,      # recicla conexões depois de 30 min
     pool_timeout=30,        # espera 30s por conexão antes de erro
 )
