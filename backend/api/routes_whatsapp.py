@@ -2431,59 +2431,66 @@ async def _processar(texto: str, numero: str, lead, estado: dict, db):
 @router.get("/inbox/conversas")
 def inbox_conversas(db: Session = Depends(get_db)):
     """Lista todas as conversas que têm mensagens no WhatsApp."""
-    from sqlalchemy import case
+    # ✅ Otimizado: 4 queries totais em vez de N×3 (evita N+1 query problem)
 
-    # Subquery: última mensagem de cada lead
-    ultima_msg = (
+    # 1. Estatísticas por lead (last_at + total_msgs)
+    stats = (
         db.query(
             WppMensagem.lead_id,
             func.max(WppMensagem.created_at).label("last_at"),
             func.count(WppMensagem.id).label("total_msgs"),
         )
         .group_by(WppMensagem.lead_id)
-        .subquery()
-    )
-
-    leads_com_msg = (
-        db.query(Lead, ultima_msg.c.last_at, ultima_msg.c.total_msgs)
-        .join(ultima_msg, Lead.id == ultima_msg.c.lead_id)
-        .order_by(desc(ultima_msg.c.last_at))
         .all()
     )
+    if not stats:
+        return []
+    lead_ids = [s.lead_id for s in stats]
+    stats_map = {s.lead_id: (s.last_at, s.total_msgs) for s in stats}
 
+    # 2. Último timestamp de assistant por lead (pra calcular não-lidas)
+    last_assistant = (
+        db.query(
+            WppMensagem.lead_id,
+            func.max(WppMensagem.created_at).label("last_at"),
+        )
+        .filter(
+            WppMensagem.lead_id.in_(lead_ids),
+            WppMensagem.role == "assistant",
+        )
+        .group_by(WppMensagem.lead_id)
+        .all()
+    )
+    last_assistant_map = {la.lead_id: la.last_at for la in last_assistant}
+
+    # 3. Última mensagem de cada lead (conteúdo + role)
+    # Usa DISTINCT ON do Postgres pra pegar a mais recente por lead
+    from sqlalchemy import text as _text
+    last_msgs_rows = db.execute(_text("""
+        SELECT DISTINCT ON (lead_id) lead_id, content, role
+        FROM wpp_mensagens
+        WHERE lead_id = ANY(:ids)
+        ORDER BY lead_id, created_at DESC
+    """), {"ids": lead_ids}).fetchall()
+    last_msg_map = {r.lead_id: (r.content, r.role) for r in last_msgs_rows}
+
+    # 4. Carrega todos os leads de uma vez
+    leads_list = db.query(Lead).filter(Lead.id.in_(lead_ids)).all()
+    leads_map = {l.id: l for l in leads_list}
+
+    # Monta resultado em memória — sem mais queries
     resultado = []
-    for lead, last_at, total in leads_com_msg:
-        # Pega a última mensagem para preview
-        last_msg = (
-            db.query(WppMensagem)
-            .filter(WppMensagem.lead_id == lead.id)
-            .order_by(desc(WppMensagem.created_at))
-            .first()
-        )
-        # Conta msgs não lidas (do user, após a última assistant)
-        ultima_resp = (
-            db.query(func.max(WppMensagem.created_at))
-            .filter(WppMensagem.lead_id == lead.id, WppMensagem.role == "assistant")
-            .scalar()
-        )
-        nao_lidas = 0
-        if ultima_resp:
-            nao_lidas = (
-                db.query(func.count(WppMensagem.id))
-                .filter(
-                    WppMensagem.lead_id == lead.id,
-                    WppMensagem.role == "user",
-                    WppMensagem.created_at > ultima_resp,
-                )
-                .scalar()
-            ) or 0
-        else:
-            nao_lidas = (
-                db.query(func.count(WppMensagem.id))
-                .filter(WppMensagem.lead_id == lead.id, WppMensagem.role == "user")
-                .scalar()
-            ) or 0
+    for lid in lead_ids:
+        lead = leads_map.get(lid)
+        if not lead:
+            continue
+        last_at, total = stats_map.get(lid, (None, 0))
+        last_content, last_role = last_msg_map.get(lid, ("", ""))
+        ultima_resp = last_assistant_map.get(lid)
 
+        # Calcula não-lidas: precisa contar user msgs após ultima_resp
+        # Faz uma única query para todas as não-lidas (já filtrado por lead_ids)
+        # Mas pra simplicidade, calculamos abaixo numa query batch
         resultado.append({
             "lead_id": lead.id,
             "name": lead.name or "",
@@ -2492,13 +2499,36 @@ def inbox_conversas(db: Session = Depends(get_db)):
             "temperature": lead.temperature or "",
             "ia_pausada": bool(getattr(lead, "ia_pausada", False)),
             "especialista_id": lead.especialista_id or "",
-            "last_msg": last_msg.content[:80] if last_msg else "",
-            "last_msg_role": last_msg.role if last_msg else "",
+            "last_msg": (last_content or "")[:80],
+            "last_msg_role": last_role or "",
             "last_at": str(last_at) if last_at else "",
             "total_msgs": total or 0,
-            "nao_lidas": nao_lidas,
+            "nao_lidas": 0,  # calcula abaixo
+            "_ultima_resp": ultima_resp,
         })
 
+    # 5. Não-lidas em uma única query (count user msgs por lead, com filtro por timestamp)
+    nao_lidas_rows = db.execute(_text("""
+        SELECT lead_id, COUNT(*) as cnt
+        FROM wpp_mensagens
+        WHERE lead_id = ANY(:ids)
+          AND role = 'user'
+          AND (
+            (SELECT MAX(created_at) FROM wpp_mensagens m2
+             WHERE m2.lead_id = wpp_mensagens.lead_id AND m2.role = 'assistant') IS NULL
+            OR created_at > (SELECT MAX(created_at) FROM wpp_mensagens m2
+                             WHERE m2.lead_id = wpp_mensagens.lead_id AND m2.role = 'assistant')
+          )
+        GROUP BY lead_id
+    """), {"ids": lead_ids}).fetchall()
+    nao_lidas_map = {r.lead_id: r.cnt for r in nao_lidas_rows}
+
+    for r in resultado:
+        r["nao_lidas"] = nao_lidas_map.get(r["lead_id"], 0)
+        r.pop("_ultima_resp", None)
+
+    # Ordena por last_at desc
+    resultado.sort(key=lambda x: x["last_at"], reverse=True)
     return resultado
 
 
