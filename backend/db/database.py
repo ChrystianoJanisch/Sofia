@@ -14,6 +14,10 @@ engine = create_engine(
     DATABASE_URL,
     connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {},
     pool_pre_ping=True,
+    pool_size=20,           # default era 5
+    max_overflow=30,        # default era 10
+    pool_recycle=1800,      # recicla conexões depois de 30 min
+    pool_timeout=30,        # espera 30s por conexão antes de erro
 )
 SessionLocal = sessionmaker(bind=engine)
 Base = declarative_base()

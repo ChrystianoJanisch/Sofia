@@ -136,6 +136,7 @@ async def executar_callbacks():
     print("🔄 Scheduler de callbacks iniciado")
 
     while True:
+        db = None
         try:
             db = SessionLocal()
             agora = _agora_brt()
@@ -183,10 +184,14 @@ async def executar_callbacks():
                     print(f"❌ Callback falhou: {lead.name} — {e}")
 
                 db.commit()
-
-            db.close()
         except Exception as e:
             print(f"❌ Erro no scheduler de callbacks: {e}")
+        finally:
+            if db is not None:
+                try:
+                    db.close()
+                except Exception:
+                    pass
 
         await asyncio.sleep(60)  # Verifica a cada 60 segundos
 
@@ -251,19 +256,18 @@ async def executar_followups():
     print("🔄 Scheduler de follow-ups iniciado")
 
     while True:
+        db = None
         try:
             db = SessionLocal()
             agora = _agora_brt()
 
             # Só roda entre 9h e 18h (horário comercial)
             if agora.hour < 9 or agora.hour >= 18:
-                db.close()
                 await asyncio.sleep(3600)
                 continue
 
             # Só roda em dias úteis
             if agora.weekday() >= 5:
-                db.close()
                 await asyncio.sleep(3600)
                 continue
 
@@ -325,10 +329,14 @@ async def executar_followups():
 
             if enviados > 0:
                 print(f"📨 Follow-ups do dia: {enviados} enviados")
-
-            db.close()
         except Exception as e:
             print(f"❌ Erro no scheduler de follow-ups: {e}")
+        finally:
+            if db is not None:
+                try:
+                    db.close()
+                except Exception:
+                    pass
 
         # Verifica a cada 6 horas
         await asyncio.sleep(6 * 3600)
