@@ -98,7 +98,7 @@ def _enviar_template(numero: str, template_name: str, params: list, lang: str = 
 
 
 # ── TEMPLATES (configuráveis por env vars) ──────────────────────────────────
-TPL_FOLLOWUP_NAO_ATENDEU = os.getenv("WA_TPL_FOLLOWUP_NAO_ATENDEU", "followup_ligacao_nao_atendido")
+TPL_FOLLOWUP_NAO_ATENDEU = os.getenv("WA_TPL_FOLLOWUP_NAO_ATENDEU", "followup_ligacao_nao_atendida")
 TPL_CALLBACK_CONFIRMADO  = os.getenv("WA_TPL_CALLBACK_CONFIRMADO", "callback_confirmado")
 TPL_LEMBRETE_REUNIAO     = os.getenv("WA_TPL_LEMBRETE_REUNIAO", "lembrete_reuniao")
 TPL_CONFIRMACAO_VIDEO    = os.getenv("WA_TPL_CONFIRMACAO_VIDEO", "confirmacao_reuniao_video")
